@@ -29,7 +29,7 @@ vendor/
 # Docker
 docker-compose.override.yml
 
-# Logs
+# Log files
 *.log
 logs/
 

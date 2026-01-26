@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 )
 
@@ -71,7 +73,7 @@ func (s *OrderSyncService) MapTikTokStatusToLocal(tiktokStatus models.TikTokOrde
 
 // SyncOrderToLocal - Đồng bộ order từ TikTok vào hệ thống local
 func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.Order) error {
-	log.Printf("Syncing order %s to local", order.TikTokOrderID)
+	logger.Info("syncing order to local", zap.String("tiktok_order_id", order.TikTokOrderID))
 
 	// Get order items
 	var items []models.OrderItem
@@ -86,7 +88,9 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 		}
 
 		if err := s.mapOrderItemToSKU(ctx, &items[i]); err != nil {
-			log.Printf("Failed to map item %s to SKU: %v", items[i].TikTokOrderItemID, err)
+			logger.Warn("failed to map order item to SKU",
+				zap.String("item_id", items[i].TikTokOrderItemID),
+				zap.Error(err))
 			order.SyncState = models.SyncStateManualReview
 			order.RawPayload = appendError(order.RawPayload, fmt.Sprintf("item %s: %v", items[i].TikTokOrderItemID, err))
 		}
@@ -101,7 +105,9 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 				continue
 			}
 			if err := s.reserveSKU(ctx, *item.SKUID, order.TikTokOrderID); err != nil {
-				log.Printf("Failed to reserve SKU %d: %v", *item.SKUID, err)
+				logger.Warn("failed to reserve SKU",
+					zap.Uint("sku_id", *item.SKUID),
+					zap.Error(err))
 				order.SyncState = models.SyncStateManualReview
 			}
 		}
@@ -114,7 +120,9 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 				continue
 			}
 			if err := s.markSKUAsSold(ctx, *item.SKUID); err != nil {
-				log.Printf("Failed to mark SKU %d as sold: %v", *item.SKUID, err)
+				logger.Error("failed to mark SKU as sold",
+					zap.Uint("sku_id", *item.SKUID),
+					zap.Error(err))
 			}
 		}
 	}
@@ -126,7 +134,9 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 				continue
 			}
 			if err := s.releaseSKU(ctx, *item.SKUID); err != nil {
-				log.Printf("Failed to release SKU %d: %v", *item.SKUID, err)
+				logger.Error("failed to release SKU",
+					zap.Uint("sku_id", *item.SKUID),
+					zap.Error(err))
 			}
 		}
 	}
@@ -140,35 +150,44 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 		return fmt.Errorf("failed to update order: %w", err)
 	}
 
-	log.Printf("Order %s synced: tiktok_status=%s, local_status=%s, sync_state=%s",
-		order.TikTokOrderID, order.TikTokOrderStatus, localStatus, order.SyncState)
+	logger.Info("order synced",
+		zap.String("tiktok_order_id", order.TikTokOrderID),
+		zap.String("tiktok_status", string(order.TikTokOrderStatus)),
+		zap.String("local_status", string(localStatus)),
+		zap.String("sync_state", string(order.SyncState)))
 
 	return nil
 }
 
-// mapOrderItemToSKU - Map order item với SKU trong DB dựa trên seller_sku
+// mapOrderItemToSKU - Map order item với SKU trong DB
+// Ưu tiên lookup theo tik_tok_sku_id (chính xác nhất), fallback sang seller_sku
 func (s *OrderSyncService) mapOrderItemToSKU(ctx context.Context, item *models.OrderItem) error {
-	if item.SellerSKU == "" {
-		return fmt.Errorf("no seller_sku")
-	}
-
-	// Find SKU by seller_sku (số điện thoại) or tiktok_sku_id
 	var sku models.SKU
-	err := database.DB.Where("seller_sku = ?", item.SellerSKU).
-		Or("tiktok_sku_id = ?", item.TikTokSKUID).
-		First(&sku).Error
+	var err error
 
-	if err != nil {
-		return fmt.Errorf("no SKU found for seller_sku %s", item.SellerSKU)
+	// Priority 1: Lookup by tik_tok_sku_id (100% chính xác từ TikTok)
+	if item.TikTokSKUID != "" {
+		err = database.DB.Where("tik_tok_sku_id = ?", item.TikTokSKUID).First(&sku).Error
+		if err == nil {
+			item.SKUID = &sku.ID
+			return database.DB.Save(item).Error
+		}
 	}
 
-	item.SKUID = &sku.ID
-	if err := database.DB.Save(item).Error; err != nil {
-		return fmt.Errorf("failed to update item: %w", err)
+	// Priority 2: Lookup by seller_sku (số điện thoại)
+	if item.SellerSKU != "" {
+		err = database.DB.Where("seller_sku = ?", item.SellerSKU).First(&sku).Error
+		if err == nil {
+			item.SKUID = &sku.ID
+			return database.DB.Save(item).Error
+		}
 	}
 
-	log.Printf("Mapped order item %s to SKU %d (seller_sku: %s)", item.TikTokOrderItemID, sku.ID, sku.SellerSKU)
-	return nil
+	// Both failed
+	if item.TikTokSKUID == "" && item.SellerSKU == "" {
+		return fmt.Errorf("no tik_tok_sku_id or seller_sku to lookup")
+	}
+	return fmt.Errorf("no SKU found for tik_tok_sku_id=%s seller_sku=%s", item.TikTokSKUID, item.SellerSKU)
 }
 
 // shouldReserveSKU - Kiểm tra có nên reserve SKU không
@@ -223,7 +242,10 @@ func (s *OrderSyncService) reserveSKU(ctx context.Context, skuID uint, orderRef 
 		return fmt.Errorf("failed to commit: %w", err)
 	}
 
-	log.Printf("Reserved SKU %s (ID: %d) for order %s", sku.SellerSKU, skuID, orderRef)
+	logger.Info("reserved SKU for order",
+		zap.String("seller_sku", sku.SellerSKU),
+		zap.Uint("sku_id", skuID),
+		zap.String("order_ref", orderRef))
 	return nil
 }
 
@@ -279,7 +301,9 @@ func (s *OrderSyncService) ReleaseSKU(ctx context.Context, skuID uint, orderRef 
 	if err := s.releaseSKU(ctx, skuID); err != nil {
 		return err
 	}
-	log.Printf("Released SKU %d from order %s", skuID, orderRef)
+	logger.Info("released SKU from order",
+		zap.Uint("sku_id", skuID),
+		zap.String("order_ref", orderRef))
 	return nil
 }
 

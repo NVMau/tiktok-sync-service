@@ -9,6 +9,8 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
+	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/services"
 	"github.com/user/sync-tiktok-mps/internal/workers"
 )
@@ -27,6 +29,20 @@ func NewFulfillmentHandler(cfg *config.Config) *FulfillmentHandler {
 	}
 }
 
+// getShopByParam looks up shop by TikTok Shop ID or auto-increment ID
+func (h *FulfillmentHandler) getShopByParam(shopIDParam string) (*models.Shop, error) {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", shopIDParam).First(&shop).Error; err == nil {
+		return &shop, nil
+	}
+	if id, err := strconv.ParseUint(shopIDParam, 10, 32); err == nil {
+		if err := database.DB.First(&shop, id).Error; err == nil {
+			return &shop, nil
+		}
+	}
+	return nil, fiber.NewError(fiber.StatusNotFound, "shop not found")
+}
+
 type ShipOrderRequest struct {
 	ShopCipher     string `json:"shop_cipher"`
 	TrackingNumber string `json:"tracking_number"`
@@ -34,9 +50,11 @@ type ShipOrderRequest struct {
 }
 
 func (h *FulfillmentHandler) ShipOrder(c *fiber.Ctx) error {
-	shopIDStr := c.Params("shop_id")
+	shop, err := h.getShopByParam(c.Params("shop_id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
+	}
 	orderID := c.Params("order_id")
-	shopID, _ := strconv.ParseUint(shopIDStr, 10, 32)
 
 	var req ShipOrderRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -51,9 +69,14 @@ func (h *FulfillmentHandler) ShipOrder(c *fiber.Ctx) error {
 		})
 	}
 
-	err := h.fulfillmentService.ShipOrder(c.Context(), &services.ShipOrderRequest{
-		ShopID:         uint(shopID),
-		ShopCipher:     req.ShopCipher,
+	shopCipher := req.ShopCipher
+	if shopCipher == "" {
+		shopCipher = shop.ShopCipher
+	}
+
+	err = h.fulfillmentService.ShipOrder(c.Context(), &services.ShipOrderRequest{
+		ShopID:         shop.ID,
+		ShopCipher:     shopCipher,
 		TikTokOrderID:  orderID,
 		TrackingNumber: req.TrackingNumber,
 		CarrierID:      req.CarrierID,
@@ -72,27 +95,30 @@ func (h *FulfillmentHandler) ShipOrder(c *fiber.Ctx) error {
 }
 
 func (h *FulfillmentHandler) ShipOrderAsync(c *fiber.Ctx) error {
-	shopIDStr := c.Params("shop_id")
+	shop, err := h.getShopByParam(c.Params("shop_id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
+	}
 	orderID := c.Params("order_id")
-	shopID, _ := strconv.ParseUint(shopIDStr, 10, 32)
 
 	var req ShipOrderRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid request body",
-		})
+	_ = c.BodyParser(&req)
+
+	shopCipher := req.ShopCipher
+	if shopCipher == "" {
+		shopCipher = shop.ShopCipher
 	}
 
 	taskPayload, _ := json.Marshal(workers.ShipPayload{
-		ShopID:         uint(shopID),
-		ShopCipher:     req.ShopCipher,
+		ShopID:         shop.ID,
+		ShopCipher:     shopCipher,
 		TikTokOrderID:  orderID,
 		TrackingNumber: req.TrackingNumber,
 		CarrierID:      req.CarrierID,
 	})
 
 	task := asynq.NewTask(workers.TaskShipPackage, taskPayload)
-	_, err := h.asynqClient.Enqueue(task,
+	_, err = h.asynqClient.Enqueue(task,
 		asynq.Queue("critical"),
 		asynq.MaxRetry(3),
 		asynq.Timeout(30*time.Second),
@@ -110,10 +136,12 @@ func (h *FulfillmentHandler) ShipOrderAsync(c *fiber.Ctx) error {
 }
 
 func (h *FulfillmentHandler) GetReadyToShipOrders(c *fiber.Ctx) error {
-	shopIDStr := c.Params("shop_id")
-	shopID, _ := strconv.ParseUint(shopIDStr, 10, 32)
+	shop, err := h.getShopByParam(c.Params("shop_id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
+	}
 
-	orders, err := h.fulfillmentService.GetOrdersReadyToShip(c.Context(), uint(shopID))
+	orders, err := h.fulfillmentService.GetOrdersReadyToShip(c.Context(), shop.ID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -127,10 +155,12 @@ func (h *FulfillmentHandler) GetReadyToShipOrders(c *fiber.Ctx) error {
 }
 
 func (h *FulfillmentHandler) GetInTransitOrders(c *fiber.Ctx) error {
-	shopIDStr := c.Params("shop_id")
-	shopID, _ := strconv.ParseUint(shopIDStr, 10, 32)
+	shop, err := h.getShopByParam(c.Params("shop_id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
+	}
 
-	orders, err := h.fulfillmentService.GetOrdersInTransit(c.Context(), uint(shopID))
+	orders, err := h.fulfillmentService.GetOrdersInTransit(c.Context(), shop.ID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -143,16 +173,17 @@ func (h *FulfillmentHandler) GetInTransitOrders(c *fiber.Ctx) error {
 	})
 }
 
-type GetShopCipherRequest struct {
-	ShopCipher string `json:"shop_cipher" query:"shop_cipher"`
-}
-
 func (h *FulfillmentHandler) GetShippingProviders(c *fiber.Ctx) error {
-	shopIDStr := c.Params("shop_id")
+	shop, err := h.getShopByParam(c.Params("shop_id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
+	}
 	shopCipher := c.Query("shop_cipher", "")
-	shopID, _ := strconv.ParseUint(shopIDStr, 10, 32)
+	if shopCipher == "" {
+		shopCipher = shop.ShopCipher
+	}
 
-	providers, err := h.fulfillmentService.GetShippingProviders(c.Context(), uint(shopID), shopCipher)
+	providers, err := h.fulfillmentService.GetShippingProviders(c.Context(), shop.ID, shopCipher)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -166,11 +197,16 @@ func (h *FulfillmentHandler) GetShippingProviders(c *fiber.Ctx) error {
 }
 
 func (h *FulfillmentHandler) GetWarehouses(c *fiber.Ctx) error {
-	shopIDStr := c.Params("shop_id")
+	shop, err := h.getShopByParam(c.Params("shop_id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
+	}
 	shopCipher := c.Query("shop_cipher", "")
-	shopID, _ := strconv.ParseUint(shopIDStr, 10, 32)
+	if shopCipher == "" {
+		shopCipher = shop.ShopCipher
+	}
 
-	warehouses, err := h.fulfillmentService.GetWarehouses(c.Context(), uint(shopID), shopCipher)
+	warehouses, err := h.fulfillmentService.GetWarehouses(c.Context(), shop.ID, shopCipher)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

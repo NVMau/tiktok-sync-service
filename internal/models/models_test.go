@@ -19,17 +19,17 @@ func TestOAuthToken_TableName(t *testing.T) {
 	}
 }
 
-func TestProductMapping_TableName(t *testing.T) {
-	pm := ProductMapping{}
-	if pm.TableName() != "tiktok_sync.product_mappings" {
-		t.Errorf("ProductMapping.TableName() = %s", pm.TableName())
+func TestProduct_TableName(t *testing.T) {
+	p := Product{}
+	if p.TableName() != "tiktok_sync.products" {
+		t.Errorf("Product.TableName() = %s", p.TableName())
 	}
 }
 
-func TestInventoryState_TableName(t *testing.T) {
-	is := InventoryState{}
-	if is.TableName() != "tiktok_sync.inventory_states" {
-		t.Errorf("InventoryState.TableName() = %s", is.TableName())
+func TestSKU_TableName(t *testing.T) {
+	s := SKU{}
+	if s.TableName() != "tiktok_sync.skus" {
+		t.Errorf("SKU.TableName() = %s", s.TableName())
 	}
 }
 

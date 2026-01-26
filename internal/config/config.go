@@ -8,9 +8,19 @@ import (
 )
 
 type Config struct {
-	DatabaseURL         string
-	RedisURL            string
-	Port                string
+	// Server
+	Port        string
+	Environment string // development, production
+
+	// Database
+	DatabaseURL string
+	RedisURL    string
+
+	// Logging
+	LogLevel  string // debug, info, warn, error
+	LogOutput string // stdout, stderr, or file path
+
+	// TikTok API
 	TikTokAppKey        string
 	TikTokAppSecret     string
 	TikTokServiceID     string
@@ -30,9 +40,19 @@ func Load() *Config {
 		godotenv.Load()
 
 		cfg = &Config{
-			DatabaseURL:         getEnv("DATABASE_URL", "postgres://tiktok_sync:tiktok_sync_secret@localhost:5432/tiktok_sync_db?sslmode=disable"),
-			RedisURL:            getEnv("REDIS_URL", "localhost:6379"),
-			Port:                getEnv("PORT", "8000"),
+			// Server
+			Port:        getEnv("PORT", "8000"),
+			Environment: getEnv("ENVIRONMENT", "development"),
+
+			// Database
+			DatabaseURL: getEnv("DATABASE_URL", "postgres://tiktok_sync:tiktok_sync_secret@localhost:5432/tiktok_sync_db?sslmode=disable"),
+			RedisURL:    getEnv("REDIS_URL", "localhost:6379"),
+
+			// Logging
+			LogLevel:  getEnv("LOG_LEVEL", "info"),
+			LogOutput: getEnv("LOG_OUTPUT", "stdout"),
+
+			// TikTok API
 			TikTokAppKey:        getEnv("TIKTOK_APP_KEY", ""),
 			TikTokAppSecret:     getEnv("TIKTOK_APP_SECRET", ""),
 			TikTokServiceID:     getEnv("TIKTOK_SERVICE_ID", ""),

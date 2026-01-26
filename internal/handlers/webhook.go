@@ -5,15 +5,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/workers"
 	"github.com/user/sync-tiktok-mps/pkg/signature"
@@ -74,25 +75,25 @@ func getWebhookTypeName(typeCode int) string {
 func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 	body := c.Body()
 
-	// Debug: log raw payload
-	log.Printf("Webhook raw body: %s", string(body))
+	logger.Debug("webhook raw body received", zap.ByteString("body", body))
 
 	sigValid, sigTimestamp := h.verifySignature(c, body)
 
 	var payload WebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		log.Printf("Webhook parse error: %v, body: %s", err, string(body))
-		// Return 200 anyway to prevent TikTok retries
+		logger.Error("webhook parse error",
+			zap.Error(err),
+			zap.ByteString("body", body))
 		return c.SendStatus(fiber.StatusOK)
 	}
 
 	if !h.validateTimestamp(payload.Timestamp) {
-		log.Printf("Webhook timestamp too old: %d", payload.Timestamp)
+		logger.Warn("webhook timestamp too old", zap.Int64("timestamp", payload.Timestamp))
 	}
 
 	var shop models.Shop
 	if err := database.DB.Where("shop_id = ?", payload.ShopID).First(&shop).Error; err != nil {
-		log.Printf("Webhook received for unknown shop: %s", payload.ShopID)
+		logger.Warn("webhook received for unknown shop", zap.String("shop_id", payload.ShopID))
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"message": "shop not found, ignored",
 		})
@@ -113,25 +114,28 @@ func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 
 	result := database.DB.Where("event_id = ?", eventID).FirstOrCreate(&event)
 	if result.Error != nil {
-		log.Printf("Failed to store webhook event: %v", result.Error)
-		// Still return 200 to prevent retries
+		logger.Error("failed to store webhook event", zap.Error(result.Error))
 		return c.SendStatus(fiber.StatusOK)
 	}
 
 	if result.RowsAffected == 0 {
-		log.Printf("Duplicate webhook event: %s", eventID)
+		logger.Debug("duplicate webhook event", zap.String("event_id", eventID))
 		return c.SendStatus(fiber.StatusOK)
 	}
 
 	if err := h.enqueueProcessing(event.ID, eventTypeName); err != nil {
-		log.Printf("Failed to enqueue webhook processing: %v", err)
+		logger.Error("failed to enqueue webhook processing", zap.Error(err))
 		event.ProcessStatus = models.EventStatusFailed
 		event.Error = err.Error()
 		database.DB.Save(&event)
 	}
 
-	log.Printf("Webhook received: type=%s, shop=%s, event_id=%s, sig_valid=%v, sig_ts=%s",
-		eventTypeName, payload.ShopID, eventID, sigValid, sigTimestamp)
+	logger.Info("webhook received",
+		zap.String("event_type", eventTypeName),
+		zap.String("shop_id", payload.ShopID),
+		zap.String("event_id", eventID),
+		zap.Bool("sig_valid", sigValid),
+		zap.String("sig_timestamp", sigTimestamp))
 
 	// TikTok requires 200 with empty body
 	return c.SendStatus(fiber.StatusOK)

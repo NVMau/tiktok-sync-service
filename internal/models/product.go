@@ -37,6 +37,7 @@ const (
 type Product struct {
 	ID              uint           `gorm:"primaryKey" json:"id"`
 	ShopID          uint           `gorm:"index;not null" json:"shop_id"`                          // FK → shops.id
+	TikTokShopID    string         `gorm:"size:100;index;not null" json:"tiktok_shop_id"`          // TikTok shop ID thật (để đồng bộ)
 	TikTokProductID string         `gorm:"size:100;uniqueIndex;not null" json:"tiktok_product_id"` // ID từ TikTok
 	Title           string         `gorm:"size:500;not null" json:"title"`                         // "Sim Thần Tài", "Sim Lộc Phát"
 	Description     string         `gorm:"type:text" json:"description"`                           // Mô tả sản phẩm
@@ -49,9 +50,9 @@ type Product struct {
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 
-	// Relations
-	Shop *Shop `gorm:"foreignKey:ShopID" json:"shop,omitempty"`
-	SKUs []SKU `gorm:"foreignKey:ProductID" json:"skus,omitempty"`
+	// Relations (not migrated, used for preload only)
+	Shop *Shop `gorm:"-" json:"shop,omitempty"`
+	SKUs []SKU `gorm:"-" json:"skus,omitempty"`
 }
 
 func (Product) TableName() string {
@@ -129,9 +130,9 @@ const (
 
 type SKU struct {
 	ID            uint           `gorm:"primaryKey" json:"id"`
-	ProductID     uint           `gorm:"index;not null" json:"product_id"`                    // FK → products.id
-	TikTokSKUID   *string        `gorm:"size:100;index" json:"tiktok_sku_id"`                 // ID từ TikTok (null nếu chưa push)
-	SellerSKU     string         `gorm:"size:100;uniqueIndex;not null" json:"seller_sku"`    // Số điện thoại: "0912345678"
+	ProductID     uint           `gorm:"index;not null" json:"product_id"`                              // FK → products.id
+	TikTokSKUID   *string        `gorm:"column:tik_tok_sku_id;size:100;uniqueIndex" json:"tiktok_sku_id"` // ID từ TikTok (UNIQUE)
+	SellerSKU     string         `gorm:"size:100;index;not null" json:"seller_sku"`                     // Số điện thoại (không unique vì có thể trùng giữa các product)
 	Price         float64        `gorm:"type:decimal(15,2);not null" json:"price"`           // Giá bán (VND)
 	OriginalPrice *float64       `gorm:"type:decimal(15,2)" json:"original_price,omitempty"` // Giá gốc (nếu có giảm giá)
 	Quantity      int            `gorm:"not null;default:1" json:"quantity"`                 // 0 hoặc 1
@@ -153,8 +154,8 @@ type SKU struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 
-	// Relations
-	Product *Product `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	// Relations (not migrated, used for preload only)
+	Product *Product `gorm:"-" json:"product,omitempty"`
 }
 
 func (SKU) TableName() string {

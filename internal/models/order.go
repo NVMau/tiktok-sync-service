@@ -32,6 +32,7 @@ const (
 type Order struct {
 	ID                uint              `gorm:"primaryKey" json:"id"`
 	ShopID            uint              `gorm:"index;not null" json:"shop_id"`                                           // FK → shops.id
+	TikTokShopID      string            `gorm:"size:100;index;not null" json:"tiktok_shop_id"`                           // TikTok shop ID thật
 	TikTokOrderID     string            `gorm:"column:tik_tok_order_id;size:100;uniqueIndex;not null" json:"tiktok_order_id"`
 	TikTokOrderStatus TikTokOrderStatus `gorm:"column:tik_tok_order_status;size:50;index" json:"tiktok_order_status"`
 	PaymentStatus     string            `gorm:"size:50" json:"payment_status"`                                           // PAID / UNPAID
@@ -49,9 +50,9 @@ type Order struct {
 	CreatedAt         time.Time         `json:"created_at"`
 	UpdatedAt         time.Time         `json:"updated_at"`
 
-	// Relations
-	Shop  *Shop       `gorm:"foreignKey:ShopID" json:"shop,omitempty"`
-	Items []OrderItem `gorm:"foreignKey:OrderID" json:"items,omitempty"`
+	// Relations (not migrated, used for preload only)
+	Shop  *Shop       `gorm:"-" json:"shop,omitempty"`
+	Items []OrderItem `gorm:"-" json:"items,omitempty"`
 }
 
 func (Order) TableName() string {
@@ -70,9 +71,9 @@ type OrderItem struct {
 	Price             float64 `gorm:"type:decimal(15,2)" json:"price"`
 	CreatedAt         time.Time `json:"created_at"`
 
-	// Relations
-	Order *Order `gorm:"foreignKey:OrderID" json:"order,omitempty"`
-	SKU   *SKU   `gorm:"foreignKey:SKUID" json:"sku,omitempty"`
+	// Relations (not migrated, used for preload only)
+	Order *Order `gorm:"-" json:"order,omitempty"`
+	SKU   *SKU   `gorm:"-" json:"sku,omitempty"`
 }
 
 func (OrderItem) TableName() string {

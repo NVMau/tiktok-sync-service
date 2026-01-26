@@ -3,10 +3,12 @@ package services
 import (
 	"context"
 	"fmt"
-	"log"
+
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/tiktok"
 )
@@ -70,8 +72,10 @@ func (s *FulfillmentSyncService) ShipOrder(ctx context.Context, req *ShipOrderRe
 	order.TikTokOrderStatus = models.OrderStatusAwaitingCollection
 	database.DB.Save(&order)
 
-	log.Printf("Order shipped: %s, tracking=%s, carrier=%s",
-		req.TikTokOrderID, req.TrackingNumber, req.CarrierID)
+	logger.Info("order shipped",
+		zap.String("tiktok_order_id", req.TikTokOrderID),
+		zap.String("tracking_number", req.TrackingNumber),
+		zap.String("carrier_id", req.CarrierID))
 
 	return nil
 }
@@ -85,7 +89,7 @@ func (s *FulfillmentSyncService) MarkDelivered(ctx context.Context, shopID uint,
 		return fmt.Errorf("failed to mark delivered: %w", err)
 	}
 
-	log.Printf("Package marked as delivered: %s", packageID)
+	logger.Info("package marked as delivered", zap.String("package_id", packageID))
 	return nil
 }
 

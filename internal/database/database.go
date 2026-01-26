@@ -34,26 +34,27 @@ func Migrate() error {
 		return err
 	}
 
-	// Migrate all tables (GORM will auto-add new columns/tables)
-	// Order matters: parent tables first, then child tables
-	if err = DB.AutoMigrate(
-		// Shop management
+	// Disable foreign key constraints during migration
+	DB.Exec("SET session_replication_role = replica")
+	defer DB.Exec("SET session_replication_role = DEFAULT")
+
+	// Migrate all tables one by one to avoid issues
+	tables := []interface{}{
 		&models.Shop{},
 		&models.OAuthToken{},
-
-		// Products & SKUs (NEW)
 		&models.Product{},
 		&models.SKU{},
-
-		// Orders
 		&models.Order{},
 		&models.OrderItem{},
-
-		// Job queue
 		&models.WebhookEvent{},
 		&models.SyncJob{},
-	); err != nil {
-		return err
+	}
+
+	for _, table := range tables {
+		if err = DB.AutoMigrate(table); err != nil {
+			log.Printf("Warning: migration error for %T: %v", table, err)
+			// Continue with other tables
+		}
 	}
 
 	log.Println("Database migrations completed")

@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/tiktok"
 )
@@ -344,7 +346,8 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 			updated++
 		}
 
-		// Sync order items
+		// Sync order items (use orderModel.ID which is now set correctly)
+		orderID := orderModel.ID
 		for _, item := range detail.LineItems {
 			price := 0.0
 			if item.SalePrice != "" {
@@ -352,7 +355,7 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 			}
 
 			itemModel := models.OrderItem{
-				OrderID:           orderModel.ID,
+				OrderID:           orderID,
 				TikTokOrderItemID: item.ID,
 				TikTokProductID:   item.ProductID,
 				TikTokSKUID:       item.SkuID,
@@ -361,9 +364,13 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 				Price:             price,
 			}
 
-			database.DB.Where("tiktok_order_item_id = ?", item.ID).
+			if err := database.DB.Where("tik_tok_order_item_id = ?", item.ID).
 				Assign(itemModel).
-				FirstOrCreate(&itemModel)
+				FirstOrCreate(&itemModel).Error; err != nil {
+				logger.Error("failed to save order item",
+					zap.String("item_id", item.ID),
+					zap.Error(err))
+			}
 		}
 	}
 

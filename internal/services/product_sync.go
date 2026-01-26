@@ -4,26 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/tiktok"
 )
 
-// =============================================================================
-// ProductSyncService - Quản lý đồng bộ Products và SKUs với TikTok
-// =============================================================================
-
+// ProductSyncService handles synchronization of products and SKUs with TikTok
 type ProductSyncService struct {
 	cfg          *config.Config
 	client       *tiktok.Client
 	tokenManager *tiktok.TokenManager
 	productsAPI  *tiktok.ProductsAPI
+	log          *zap.Logger
 }
 
+// NewProductSyncService creates a new ProductSyncService instance
 func NewProductSyncService(cfg *config.Config) *ProductSyncService {
 	client := tiktok.NewClient(cfg)
 	tokenManager := tiktok.NewTokenManager(cfg)
@@ -33,69 +34,93 @@ func NewProductSyncService(cfg *config.Config) *ProductSyncService {
 		client:       client,
 		tokenManager: tokenManager,
 		productsAPI:  tiktok.NewProductsAPI(client, tokenManager),
+		log:          logger.Log.Named("product_sync"),
 	}
 }
 
 // =============================================================================
-// PRODUCT OPERATIONS
+// PRODUCT SYNC OPERATIONS
 // =============================================================================
 
-// SyncProductsFromTikTok - Đồng bộ tất cả products từ TikTok về DB
+// SyncProductsFromTikTok fetches and syncs all products from TikTok to local DB
 func (s *ProductSyncService) SyncProductsFromTikTok(ctx context.Context, shopID uint, shopCipher string) (int, error) {
+	log := s.log.With(zap.Uint("shop_id", shopID))
+
 	var shop models.Shop
 	if err := database.DB.First(&shop, shopID).Error; err != nil {
+		log.Error("shop not found", zap.Error(err))
 		return 0, fmt.Errorf("shop not found: %w", err)
 	}
 
-	// Fetch products from TikTok
 	resp, err := s.productsAPI.GetProductList(ctx, &tiktok.ProductListRequest{
 		ShopID:     shopID,
 		ShopCipher: shopCipher,
 		PageSize:   100,
 	})
 	if err != nil {
+		log.Error("failed to fetch products from TikTok", zap.Error(err))
 		return 0, fmt.Errorf("failed to fetch products: %w", err)
 	}
 
 	syncedCount := 0
 	for _, p := range resp.Products {
-		// Upsert product
 		product := models.Product{
 			ShopID:          shopID,
+			TikTokShopID:    shop.ShopID, // Lưu TikTok shop ID thật để đảm bảo đồng bộ
 			TikTokProductID: p.ID,
 			Title:           p.Title,
 			Status:          models.ProductStatus(p.Status),
 		}
 
-		result := database.DB.Where("tiktok_product_id = ?", p.ID).
+		result := database.DB.Where("tik_tok_product_id = ?", p.ID).
 			Assign(product).
 			FirstOrCreate(&product)
 
 		if result.Error != nil {
-			log.Printf("Failed to upsert product %s: %v", p.ID, result.Error)
+			log.Warn("failed to upsert product",
+				zap.String("tiktok_product_id", p.ID),
+				zap.Error(result.Error))
 			continue
 		}
 
-		// Fetch and sync SKUs for this product
 		if err := s.SyncSKUsFromTikTok(ctx, shopID, shopCipher, &product); err != nil {
-			log.Printf("Failed to sync SKUs for product %s: %v", p.ID, err)
+			log.Warn("failed to sync SKUs for product",
+				zap.String("tiktok_product_id", p.ID),
+				zap.Error(err))
 		}
 
 		syncedCount++
 	}
 
-	log.Printf("Synced %d products from TikTok for shop %d", syncedCount, shopID)
+	log.Info("products synced from TikTok",
+		zap.Int("synced_count", syncedCount),
+		zap.Int("total_products", len(resp.Products)))
+
 	return syncedCount, nil
 }
 
-// SyncSKUsFromTikTok - Đồng bộ SKUs của 1 product từ TikTok
+// SyncSKUsFromTikTok syncs SKUs of a product from TikTok
 func (s *ProductSyncService) SyncSKUsFromTikTok(ctx context.Context, shopID uint, shopCipher string, product *models.Product) error {
 	detail, err := s.productsAPI.GetProductDetail(ctx, shopID, shopCipher, product.TikTokProductID)
 	if err != nil {
 		return fmt.Errorf("failed to get product detail: %w", err)
 	}
 
-	// Update product info
+	s.updateProductFromDetail(product, detail)
+
+	for _, sku := range detail.SKUs {
+		if err := s.upsertSKUFromTikTok(product.ID, &sku); err != nil {
+			s.log.Warn("failed to upsert SKU",
+				zap.String("seller_sku", sku.SellerSku),
+				zap.Error(err))
+		}
+	}
+
+	return nil
+}
+
+// updateProductFromDetail updates product fields from TikTok detail response
+func (s *ProductSyncService) updateProductFromDetail(product *models.Product, detail *tiktok.ProductDetail) {
 	product.Title = detail.Title
 	product.Description = detail.Description
 	product.CategoryID = detail.CategoryID
@@ -113,88 +138,115 @@ func (s *ProductSyncService) SyncSKUsFromTikTok(ctx context.Context, shopID uint
 	product.SyncedAt = &now
 	product.SKUCount = len(detail.SKUs)
 	database.DB.Save(product)
+}
 
-	// Sync each SKU
-	for _, sku := range detail.SKUs {
-		tiktokSKUID := sku.ID
-
-		// Calculate total quantity from all warehouses
-		totalQty := 0
-		for _, inv := range sku.Inventory {
-			totalQty += inv.Quantity
-		}
-
-		// Parse price
-		var price float64
-		if sku.Price.SalePrice != "" {
-			fmt.Sscanf(sku.Price.SalePrice, "%f", &price)
-		}
-
-		var originalPrice *float64
-		if sku.Price.OriginalPrice != "" {
-			var op float64
-			fmt.Sscanf(sku.Price.OriginalPrice, "%f", &op)
-			originalPrice = &op
-		}
-
-		// Inventory info JSON
-		invJSON, _ := json.Marshal(sku.Inventory)
-
-		// Sales attributes JSON
-		attrJSON, _ := json.Marshal(sku.SalesAttributes)
-
-		// Upsert SKU
-		skuModel := models.SKU{
-			ProductID:       product.ID,
-			TikTokSKUID:     &tiktokSKUID,
-			SellerSKU:       sku.SellerSku,
-			Price:           price,
-			OriginalPrice:   originalPrice,
-			Quantity:        totalQty,
-			SyncStatus:      models.SKUSyncStatusSynced, // Đã có trên TikTok
-			SaleStatus:      models.SKUSaleStatusAvailable,
-			SalesAttributes: attrJSON,
-			InventoryInfo:   invJSON,
-			SyncedAt:        &now,
-		}
-
-		// Determine sale status based on quantity
-		if totalQty == 0 {
-			skuModel.SaleStatus = models.SKUSaleStatusSold
-		}
-
-		result := database.DB.Where("seller_sku = ?", sku.SellerSku).
-			Assign(skuModel).
-			FirstOrCreate(&skuModel)
-
-		if result.Error != nil {
-			log.Printf("Failed to upsert SKU %s: %v", sku.SellerSku, result.Error)
-			continue
-		}
-
-		log.Printf("Synced SKU: %s (TikTok ID: %s, qty: %d)", sku.SellerSku, sku.ID, totalQty)
+// upsertSKUFromTikTok creates or updates a SKU from TikTok data
+// Uses tik_tok_sku_id as primary lookup key (unique from TikTok)
+func (s *ProductSyncService) upsertSKUFromTikTok(productID uint, tikSKU *tiktok.ProductSKU) error {
+	totalQty := 0
+	for _, inv := range tikSKU.Inventory {
+		totalQty += inv.Quantity
 	}
+
+	var price float64
+	if tikSKU.Price.SalePrice != "" {
+		fmt.Sscanf(tikSKU.Price.SalePrice, "%f", &price)
+	}
+
+	var originalPrice *float64
+	if tikSKU.Price.OriginalPrice != "" {
+		var op float64
+		fmt.Sscanf(tikSKU.Price.OriginalPrice, "%f", &op)
+		originalPrice = &op
+	}
+
+	invJSON, _ := json.Marshal(tikSKU.Inventory)
+	attrJSON, _ := json.Marshal(tikSKU.SalesAttributes)
+
+	now := time.Now()
+	tiktokSKUID := tikSKU.ID
+
+	// Determine seller_sku with fallback priority:
+	// 1. seller_sku from TikTok (if not empty)
+	// 2. sales_attributes[0].value_name (số điện thoại từ variant "CHỌN SỐ")
+	// 3. tik_tok_sku_id as last resort
+	sellerSKU := tikSKU.SellerSku
+	if sellerSKU == "" && len(tikSKU.SalesAttributes) > 0 {
+		sellerSKU = tikSKU.SalesAttributes[0].ValueName
+	}
+	if sellerSKU == "" {
+		sellerSKU = tikSKU.ID
+	}
+
+	skuModel := models.SKU{
+		ProductID:       productID,
+		TikTokSKUID:     &tiktokSKUID,
+		SellerSKU:       sellerSKU,
+		Price:           price,
+		OriginalPrice:   originalPrice,
+		Quantity:        totalQty,
+		SyncStatus:      models.SKUSyncStatusSynced,
+		SaleStatus:      models.SKUSaleStatusAvailable,
+		SalesAttributes: attrJSON,
+		InventoryInfo:   invJSON,
+		SyncedAt:        &now,
+	}
+
+	if totalQty == 0 {
+		skuModel.SaleStatus = models.SKUSaleStatusSold
+	}
+
+	// Lookup by tik_tok_sku_id (unique from TikTok) instead of seller_sku
+	result := database.DB.Where("tik_tok_sku_id = ?", tikSKU.ID).
+		Assign(skuModel).
+		FirstOrCreate(&skuModel)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	s.log.Debug("synced SKU from TikTok",
+		zap.String("seller_sku", sellerSKU),
+		zap.String("tiktok_sku_id", tikSKU.ID),
+		zap.Int("quantity", totalQty))
 
 	return nil
 }
 
-// GetProduct - Lấy thông tin product theo ID
+// =============================================================================
+// PRODUCT QUERIES
+// =============================================================================
+
+// GetProduct retrieves a product by ID with its SKUs
 func (s *ProductSyncService) GetProduct(ctx context.Context, productID uint) (*models.Product, error) {
 	var product models.Product
-	err := database.DB.Preload("SKUs").First(&product, productID).Error
-	return &product, err
+	if err := database.DB.First(&product, productID).Error; err != nil {
+		return nil, err
+	}
+
+	var skus []models.SKU
+	database.DB.Where("product_id = ?", productID).Find(&skus)
+	product.SKUs = skus
+
+	return &product, nil
 }
 
-// GetProductByTikTokID - Lấy product theo TikTok Product ID
+// GetProductByTikTokID retrieves a product by TikTok Product ID
 func (s *ProductSyncService) GetProductByTikTokID(ctx context.Context, tiktokProductID string) (*models.Product, error) {
 	var product models.Product
-	err := database.DB.Preload("SKUs").
-		Where("tiktok_product_id = ?", tiktokProductID).
-		First(&product).Error
-	return &product, err
+	err := database.DB.Where("tik_tok_product_id = ?", tiktokProductID).First(&product).Error
+	if err != nil {
+		return nil, err
+	}
+
+	var skus []models.SKU
+	database.DB.Where("product_id = ?", product.ID).Find(&skus)
+	product.SKUs = skus
+
+	return &product, nil
 }
 
-// ListProducts - Danh sách products của shop
+// ListProducts returns products for a shop with optional status filter
 func (s *ProductSyncService) ListProducts(ctx context.Context, shopID uint, status string) ([]models.Product, error) {
 	var products []models.Product
 	query := database.DB.Where("shop_id = ?", shopID)
@@ -203,23 +255,36 @@ func (s *ProductSyncService) ListProducts(ctx context.Context, shopID uint, stat
 		query = query.Where("status = ?", status)
 	}
 
-	err := query.Preload("SKUs").Order("created_at DESC").Find(&products).Error
-	return products, err
+	if err := query.Order("created_at DESC").Find(&products).Error; err != nil {
+		return nil, err
+	}
+
+	for i := range products {
+		var skus []models.SKU
+		database.DB.Where("product_id = ?", products[i].ID).Find(&skus)
+		products[i].SKUs = skus
+	}
+
+	return products, nil
 }
 
 // =============================================================================
 // SKU OPERATIONS
 // =============================================================================
 
-// CreateSKU - Tạo SKU mới (từ external system), chờ push lên TikTok
+// SKUCreateRequest represents a request to create a new SKU
+type SKUCreateRequest struct {
+	SellerSKU string  `json:"seller_sku"`
+	Price     float64 `json:"price"`
+}
+
+// CreateSKU creates a new SKU pending push to TikTok
 func (s *ProductSyncService) CreateSKU(ctx context.Context, productID uint, sellerSKU string, price float64) (*models.SKU, error) {
-	// Check product exists
 	var product models.Product
 	if err := database.DB.First(&product, productID).Error; err != nil {
 		return nil, fmt.Errorf("product not found: %w", err)
 	}
 
-	// Check duplicate seller_sku
 	var existing models.SKU
 	if err := database.DB.Where("seller_sku = ?", sellerSKU).First(&existing).Error; err == nil {
 		return nil, fmt.Errorf("seller_sku %s already exists", sellerSKU)
@@ -229,61 +294,52 @@ func (s *ProductSyncService) CreateSKU(ctx context.Context, productID uint, sell
 		ProductID:  productID,
 		SellerSKU:  sellerSKU,
 		Price:      price,
-		Quantity:   1,
-		SyncStatus: models.SKUSyncStatusPending, // Chờ push lên TikTok
+		Quantity:   1, // Phone numbers are unique
+		SyncStatus: models.SKUSyncStatusPending,
 		SaleStatus: models.SKUSaleStatusAvailable,
 	}
 
 	if err := database.DB.Create(&sku).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create SKU: %w", err)
 	}
 
-	// Update product sku_count
-	database.DB.Model(&product).UpdateColumn("sku_count", product.SKUCount+1)
+	database.DB.Model(&product).Update("sku_count", product.SKUCount+1)
 
-	log.Printf("Created new SKU: %s (pending push to TikTok)", sellerSKU)
+	s.log.Info("created new SKU",
+		zap.Uint("product_id", productID),
+		zap.String("seller_sku", sellerSKU),
+		zap.Float64("price", price))
+
 	return &sku, nil
 }
 
-// CreateSKUsBatch - Tạo nhiều SKUs cùng lúc
-func (s *ProductSyncService) CreateSKUsBatch(ctx context.Context, productID uint, skuRequests []SKUCreateRequest) ([]models.SKU, []error) {
-	var createdSKUs []models.SKU
+// CreateSKUsBatch creates multiple SKUs at once
+func (s *ProductSyncService) CreateSKUsBatch(ctx context.Context, productID uint, requests []SKUCreateRequest) ([]*models.SKU, []error) {
+	var created []*models.SKU
 	var errors []error
 
-	for _, req := range skuRequests {
+	for _, req := range requests {
 		sku, err := s.CreateSKU(ctx, productID, req.SellerSKU, req.Price)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("SKU %s: %w", req.SellerSKU, err))
 			continue
 		}
-		createdSKUs = append(createdSKUs, *sku)
+		created = append(created, sku)
 	}
 
-	return createdSKUs, errors
+	return created, errors
 }
 
-type SKUCreateRequest struct {
-	SellerSKU string  `json:"seller_sku"` // Số điện thoại
-	Price     float64 `json:"price"`
-}
-
-// GetSKU - Lấy SKU theo ID
+// GetSKU retrieves a SKU by ID
 func (s *ProductSyncService) GetSKU(ctx context.Context, skuID uint) (*models.SKU, error) {
 	var sku models.SKU
-	err := database.DB.Preload("Product").First(&sku, skuID).Error
-	return &sku, err
+	if err := database.DB.First(&sku, skuID).Error; err != nil {
+		return nil, err
+	}
+	return &sku, nil
 }
 
-// GetSKUBySellerSKU - Lấy SKU theo số điện thoại
-func (s *ProductSyncService) GetSKUBySellerSKU(ctx context.Context, sellerSKU string) (*models.SKU, error) {
-	var sku models.SKU
-	err := database.DB.Preload("Product").
-		Where("seller_sku = ?", sellerSKU).
-		First(&sku).Error
-	return &sku, err
-}
-
-// ListSKUs - Danh sách SKUs của product
+// ListSKUs returns SKUs for a product with optional filters
 func (s *ProductSyncService) ListSKUs(ctx context.Context, productID uint, syncStatus, saleStatus string) ([]models.SKU, error) {
 	var skus []models.SKU
 	query := database.DB.Where("product_id = ?", productID)
@@ -295,75 +351,33 @@ func (s *ProductSyncService) ListSKUs(ctx context.Context, productID uint, syncS
 		query = query.Where("sale_status = ?", saleStatus)
 	}
 
-	err := query.Order("created_at DESC").Find(&skus).Error
-	return skus, err
+	if err := query.Order("created_at DESC").Find(&skus).Error; err != nil {
+		return nil, err
+	}
+
+	return skus, nil
 }
 
-// GetPendingSKUs - Lấy các SKU đang chờ push lên TikTok
+// GetPendingSKUs returns all SKUs pending push for a shop
 func (s *ProductSyncService) GetPendingSKUs(ctx context.Context, shopID uint) ([]models.SKU, error) {
 	var skus []models.SKU
-	err := database.DB.Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
-		Where("skus.sync_status IN ?", []string{
-			string(models.SKUSyncStatusPending),
-			string(models.SKUSyncStatusFailed),
-		}).
+	err := database.DB.
+		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
+		Where("products.shop_id = ? AND skus.tik_tok_sku_id IS NULL", shopID).
 		Find(&skus).Error
 	return skus, err
 }
 
-// UpdateSKUPrice - Cập nhật giá SKU
+// UpdateSKUPrice updates the price of a SKU locally
 func (s *ProductSyncService) UpdateSKUPrice(ctx context.Context, skuID uint, price float64) error {
-	return database.DB.Model(&models.SKU{}).
-		Where("id = ?", skuID).
-		Updates(map[string]interface{}{
-			"price":      price,
-			"updated_at": time.Now(),
-		}).Error
-}
-
-// ReserveSKU - Đặt trước SKU khi có đơn hàng
-func (s *ProductSyncService) ReserveSKU(ctx context.Context, skuID uint) error {
-	var sku models.SKU
-	if err := database.DB.First(&sku, skuID).Error; err != nil {
-		return err
-	}
-
-	if !sku.IsSellable() {
-		return fmt.Errorf("SKU %s is not available for sale", sku.SellerSKU)
-	}
-
-	sku.Reserve()
-	return database.DB.Save(&sku).Error
-}
-
-// MarkSKUAsSold - Đánh dấu SKU đã bán
-func (s *ProductSyncService) MarkSKUAsSold(ctx context.Context, skuID uint) error {
-	var sku models.SKU
-	if err := database.DB.First(&sku, skuID).Error; err != nil {
-		return err
-	}
-
-	sku.MarkAsSold()
-	return database.DB.Save(&sku).Error
-}
-
-// ReleaseSKU - Giải phóng SKU khi đơn bị hủy
-func (s *ProductSyncService) ReleaseSKU(ctx context.Context, skuID uint) error {
-	var sku models.SKU
-	if err := database.DB.First(&sku, skuID).Error; err != nil {
-		return err
-	}
-
-	sku.Release()
-	return database.DB.Save(&sku).Error
+	return database.DB.Model(&models.SKU{}).Where("id = ?", skuID).Update("price", price).Error
 }
 
 // =============================================================================
-// TIKTOK SYNC OPERATIONS
+// TIKTOK PRODUCT ACTIONS
 // =============================================================================
 
-// DeactivateProduct - Vô hiệu hóa product trên TikTok
+// DeactivateProduct deactivates a product on TikTok
 func (s *ProductSyncService) DeactivateProduct(ctx context.Context, shopID uint, shopCipher string, productID uint) error {
 	var product models.Product
 	if err := database.DB.First(&product, productID).Error; err != nil {
@@ -378,11 +392,14 @@ func (s *ProductSyncService) DeactivateProduct(ctx context.Context, shopID uint,
 	product.Status = models.ProductStatusInactive
 	database.DB.Save(&product)
 
-	log.Printf("Deactivated product: %s", product.TikTokProductID)
+	s.log.Info("deactivated product",
+		zap.Uint("product_id", productID),
+		zap.String("tiktok_product_id", product.TikTokProductID))
+
 	return nil
 }
 
-// ActivateProduct - Kích hoạt product trên TikTok
+// ActivateProduct activates a product on TikTok
 func (s *ProductSyncService) ActivateProduct(ctx context.Context, shopID uint, shopCipher string, productID uint) error {
 	var product models.Product
 	if err := database.DB.First(&product, productID).Error; err != nil {
@@ -397,14 +414,17 @@ func (s *ProductSyncService) ActivateProduct(ctx context.Context, shopID uint, s
 	product.Status = models.ProductStatusActive
 	database.DB.Save(&product)
 
-	log.Printf("Activated product: %s", product.TikTokProductID)
+	s.log.Info("activated product",
+		zap.Uint("product_id", productID),
+		zap.String("tiktok_product_id", product.TikTokProductID))
+
 	return nil
 }
 
-// UpdatePriceOnTikTok - Cập nhật giá SKU trên TikTok
+// UpdatePriceOnTikTok updates SKU price on TikTok
 func (s *ProductSyncService) UpdatePriceOnTikTok(ctx context.Context, shopID uint, shopCipher string, skuID uint, price float64) error {
 	var sku models.SKU
-	if err := database.DB.Preload("Product").First(&sku, skuID).Error; err != nil {
+	if err := database.DB.First(&sku, skuID).Error; err != nil {
 		return fmt.Errorf("SKU not found: %w", err)
 	}
 
@@ -412,9 +432,15 @@ func (s *ProductSyncService) UpdatePriceOnTikTok(ctx context.Context, shopID uin
 		return fmt.Errorf("SKU %s not pushed to TikTok yet", sku.SellerSKU)
 	}
 
+	// Load product separately (gorm:"-" prevents Preload)
+	var product models.Product
+	if err := database.DB.First(&product, sku.ProductID).Error; err != nil {
+		return fmt.Errorf("product not found: %w", err)
+	}
+
 	priceStr := fmt.Sprintf("%.2f", price)
 	err := s.productsAPI.UpdatePrice(ctx, shopID, shopCipher, &tiktok.UpdatePriceRequest{
-		ProductID: sku.Product.TikTokProductID,
+		ProductID: product.TikTokProductID,
 		SKUs: []tiktok.UpdateSKUPrice{
 			{
 				ID:        *sku.TikTokSKUID,
@@ -432,6 +458,259 @@ func (s *ProductSyncService) UpdatePriceOnTikTok(ctx context.Context, shopID uin
 	sku.SyncedAt = &now
 	database.DB.Save(&sku)
 
-	log.Printf("Updated price on TikTok: SKU %s, price=%.2f", sku.SellerSKU, price)
+	s.log.Info("updated price on TikTok",
+		zap.Uint("sku_id", skuID),
+		zap.String("seller_sku", sku.SellerSKU),
+		zap.Float64("price", price))
+
 	return nil
+}
+
+// =============================================================================
+// PUSH SKU TO TIKTOK
+// =============================================================================
+
+// PushPendingSKUsToTikTok pushes all pending SKUs of a product to TikTok
+// Uses Partial Edit API - must include ALL existing SKUs to avoid deletion
+func (s *ProductSyncService) PushPendingSKUsToTikTok(ctx context.Context, shopID uint, shopCipher string, productID uint) (int, error) {
+	log := s.log.With(
+		zap.Uint("shop_id", shopID),
+		zap.Uint("product_id", productID))
+
+	// Step 1: Load product
+	var product models.Product
+	if err := database.DB.First(&product, productID).Error; err != nil {
+		return 0, fmt.Errorf("product not found: %w", err)
+	}
+
+	// Step 2: Fetch current SKUs from TikTok (source of truth)
+	detail, err := s.productsAPI.GetProductDetail(ctx, shopID, shopCipher, product.TikTokProductID)
+	if err != nil {
+		log.Error("failed to get product detail from TikTok", zap.Error(err))
+		return 0, fmt.Errorf("failed to get product detail from TikTok: %w", err)
+	}
+
+	warehouseID := s.getWarehouseID(detail)
+	if warehouseID == "" {
+		return 0, fmt.Errorf("no warehouse found for product %s", product.TikTokProductID)
+	}
+
+	// Step 3: Get pending SKUs from DB
+	var pendingSKUs []models.SKU
+	if err := database.DB.Where("product_id = ? AND tik_tok_sku_id IS NULL", productID).Find(&pendingSKUs).Error; err != nil {
+		return 0, fmt.Errorf("failed to get pending SKUs: %w", err)
+	}
+
+	if len(pendingSKUs) == 0 {
+		log.Debug("no pending SKUs to push")
+		return 0, nil
+	}
+
+	// Step 4: Build request with existing + new SKUs
+	editSKUs, pendingCount := s.buildPartialEditRequest(detail, pendingSKUs, warehouseID)
+
+	if pendingCount == 0 {
+		log.Debug("no new SKUs to push (all already exist on TikTok)")
+		return 0, nil
+	}
+
+	log.Info("pushing SKUs to TikTok",
+		zap.Int("new_skus", pendingCount),
+		zap.Int("existing_skus", len(detail.SKUs)))
+
+	// Step 5: Call TikTok API
+	resp, err := s.productsAPI.PartialEditProduct(ctx, shopID, shopCipher, product.TikTokProductID, &tiktok.PartialEditProductRequest{
+		SKUs: editSKUs,
+	})
+	if err != nil {
+		s.markSKUsAsFailed(pendingSKUs)
+		log.Error("failed to push SKUs to TikTok", zap.Error(err))
+		return 0, fmt.Errorf("failed to push SKUs to TikTok: %w", err)
+	}
+
+	// Step 6: Update DB with TikTok SKU IDs
+	pushedCount := s.updatePushedSKUs(productID, resp.SKUs)
+
+	log.Info("SKUs pushed successfully",
+		zap.Int("pushed_count", pushedCount),
+		zap.String("tiktok_product_id", product.TikTokProductID))
+
+	return pushedCount, nil
+}
+
+// getWarehouseID extracts warehouse ID from existing SKUs
+func (s *ProductSyncService) getWarehouseID(detail *tiktok.ProductDetail) string {
+	for _, tikSKU := range detail.SKUs {
+		if len(tikSKU.Inventory) > 0 {
+			return tikSKU.Inventory[0].WarehouseID
+		}
+	}
+	return ""
+}
+
+// buildPartialEditRequest builds the request with existing + new SKUs
+func (s *ProductSyncService) buildPartialEditRequest(detail *tiktok.ProductDetail, pendingSKUs []models.SKU, warehouseID string) ([]tiktok.PartialEditSKU, int) {
+	var editSKUs []tiktok.PartialEditSKU
+
+	// Add existing SKUs (keep them, don't overwrite inventory)
+	existingSellerSKUs := make(map[string]bool)
+	for _, tikSKU := range detail.SKUs {
+		existingSellerSKUs[tikSKU.SellerSku] = true
+
+		price := tikSKU.Price.SalePrice
+		if price == "" {
+			price = tikSKU.Price.Amount
+		}
+
+		var salesAttrs []tiktok.PartialEditAttribute
+		for _, attr := range tikSKU.SalesAttributes {
+			salesAttrs = append(salesAttrs, tiktok.PartialEditAttribute{
+				ID:        attr.ID,
+				Name:      attr.Name,
+				ValueID:   attr.ValueID,
+				ValueName: attr.ValueName,
+			})
+		}
+
+		// Keep ID + Price, skip Inventory to avoid race condition
+		editSKUs = append(editSKUs, tiktok.PartialEditSKU{
+			ID:              tikSKU.ID,
+			SellerSKU:       tikSKU.SellerSku,
+			SalesAttributes: salesAttrs,
+			Price: tiktok.PartialEditPrice{
+				Currency:  "VND",
+				SalePrice: price,
+			},
+		})
+	}
+
+	// Add new pending SKUs
+	pendingCount := 0
+	variantAttr := s.getVariantAttribute(detail)
+
+	for _, sku := range pendingSKUs {
+		if existingSellerSKUs[sku.SellerSKU] {
+			s.log.Debug("SKU already exists on TikTok, skipping",
+				zap.String("seller_sku", sku.SellerSKU))
+			continue
+		}
+
+		if variantAttr == nil {
+			s.log.Warn("product has no variant, cannot add new SKU",
+				zap.String("seller_sku", sku.SellerSKU))
+			s.markSKUAsFailed(&sku, "Product không có variant, cần setup 'CHỌN SỐ' trên TikTok trước")
+			continue
+		}
+
+		priceStr := fmt.Sprintf("%.0f", sku.Price)
+		editSKUs = append(editSKUs, tiktok.PartialEditSKU{
+			SellerSKU: sku.SellerSKU,
+			SalesAttributes: []tiktok.PartialEditAttribute{
+				{
+					ID:        variantAttr.ID,
+					Name:      variantAttr.Name,
+					ValueName: sku.SellerSKU,
+				},
+			},
+			Price: tiktok.PartialEditPrice{
+				Currency:  "VND",
+				Amount:    priceStr,
+				SalePrice: priceStr,
+			},
+			Inventory: []tiktok.PartialEditInventory{
+				{
+					WarehouseID: warehouseID,
+					Quantity:    sku.Quantity,
+				},
+			},
+		})
+
+		database.DB.Model(&sku).Update("sync_status", models.SKUSyncStatusPushing)
+		pendingCount++
+
+		s.log.Debug("preparing SKU for push",
+			zap.String("seller_sku", sku.SellerSKU),
+			zap.String("variant", variantAttr.Name))
+	}
+
+	return editSKUs, pendingCount
+}
+
+// variantAttribute holds variant info extracted from TikTok product
+type variantAttribute struct {
+	ID   string
+	Name string
+}
+
+// getVariantAttribute gets the first variant attribute from existing SKUs
+func (s *ProductSyncService) getVariantAttribute(detail *tiktok.ProductDetail) *variantAttribute {
+	if len(detail.SKUs) > 0 && len(detail.SKUs[0].SalesAttributes) > 0 {
+		attr := detail.SKUs[0].SalesAttributes[0]
+		return &variantAttribute{
+			ID:   attr.ID,
+			Name: attr.Name,
+		}
+	}
+	return nil
+}
+
+// markSKUAsFailed marks a single SKU as failed with error message
+func (s *ProductSyncService) markSKUAsFailed(sku *models.SKU, errMsg string) {
+	database.DB.Model(sku).Updates(map[string]interface{}{
+		"sync_status":   models.SKUSyncStatusFailed,
+		"error_message": errMsg,
+	})
+}
+
+// markSKUsAsFailed marks multiple SKUs as failed
+func (s *ProductSyncService) markSKUsAsFailed(skus []models.SKU) {
+	for _, sku := range skus {
+		database.DB.Model(&sku).Updates(map[string]interface{}{
+			"sync_status":   models.SKUSyncStatusFailed,
+			"push_attempts": sku.PushAttempts + 1,
+		})
+	}
+}
+
+// updatePushedSKUs updates DB with TikTok SKU IDs from response
+func (s *ProductSyncService) updatePushedSKUs(productID uint, respSKUs []tiktok.PartialEditSKURes) int {
+	now := time.Now()
+	pushedCount := 0
+
+	for _, resSKU := range respSKUs {
+		var dbSKU models.SKU
+		if err := database.DB.Where("product_id = ? AND seller_sku = ?", productID, resSKU.SellerSKU).First(&dbSKU).Error; err != nil {
+			continue
+		}
+
+		if dbSKU.TikTokSKUID == nil {
+			database.DB.Model(&dbSKU).Updates(map[string]interface{}{
+				"tik_tok_sku_id": resSKU.ID,
+				"sync_status":    models.SKUSyncStatusPushed,
+				"synced_at":      now,
+			})
+			pushedCount++
+
+			s.log.Info("SKU pushed to TikTok",
+				zap.String("seller_sku", resSKU.SellerSKU),
+				zap.String("tiktok_sku_id", resSKU.ID))
+		}
+	}
+
+	return pushedCount
+}
+
+// PushSingleSKUToTikTok pushes a single SKU to TikTok
+func (s *ProductSyncService) PushSingleSKUToTikTok(ctx context.Context, shopID uint, shopCipher string, skuID uint) error {
+	var sku models.SKU
+	if err := database.DB.First(&sku, skuID).Error; err != nil {
+		return fmt.Errorf("SKU not found: %w", err)
+	}
+
+	if sku.TikTokSKUID != nil {
+		return fmt.Errorf("SKU %s already pushed to TikTok", sku.SellerSKU)
+	}
+
+	_, err := s.PushPendingSKUsToTikTok(ctx, shopID, shopCipher, sku.ProductID)
+	return err
 }

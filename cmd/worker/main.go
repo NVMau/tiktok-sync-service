@@ -1,20 +1,30 @@
 package main
 
 import (
-	"log"
-
 	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/workers"
 )
 
 func main() {
 	cfg := config.Load()
 
+	// Initialize logger
+	logger.Init(&logger.Config{
+		Level:       cfg.LogLevel,
+		Environment: cfg.Environment,
+		OutputPath:  cfg.LogOutput,
+	})
+	defer logger.Sync()
+
+	log := logger.Log.Named("worker")
+
 	if err := database.Connect(cfg.DatabaseURL); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatal("failed to connect to database", zap.Error(err))
 	}
 
 	srv := asynq.NewServer(
@@ -32,8 +42,11 @@ func main() {
 	mux := asynq.NewServeMux()
 	workers.RegisterHandlers(mux)
 
-	log.Println("Starting Asynq worker...")
+	log.Info("starting Asynq worker",
+		zap.String("redis", cfg.RedisURL),
+		zap.String("environment", cfg.Environment))
+
 	if err := srv.Run(mux); err != nil {
-		log.Fatalf("Failed to start worker: %v", err)
+		log.Fatal("failed to start worker", zap.Error(err))
 	}
 }

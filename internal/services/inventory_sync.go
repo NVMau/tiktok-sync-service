@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/tiktok"
 )
@@ -46,7 +48,7 @@ func NewInventorySyncService(cfg *config.Config) *InventorySyncService {
 // SyncSKUInventoryToTikTok - Đồng bộ tồn kho của 1 SKU lên TikTok
 func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, shopID uint, shopCipher string, skuID uint) error {
 	var sku models.SKU
-	if err := database.DB.Preload("Product").First(&sku, skuID).Error; err != nil {
+	if err := database.DB.First(&sku, skuID).Error; err != nil {
 		return fmt.Errorf("SKU not found: %w", err)
 	}
 
@@ -54,13 +56,15 @@ func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, sho
 		return fmt.Errorf("SKU %s not pushed to TikTok yet", sku.SellerSKU)
 	}
 
-	if sku.Product == nil {
-		return fmt.Errorf("SKU %s has no product", sku.SellerSKU)
+	// Load product separately (gorm:"-" prevents Preload)
+	var product models.Product
+	if err := database.DB.First(&product, sku.ProductID).Error; err != nil {
+		return fmt.Errorf("product not found for SKU %s: %w", sku.SellerSKU, err)
 	}
 
 	// Call TikTok API to update inventory
 	err := s.productsAPI.UpdateInventory(ctx, shopID, shopCipher, &tiktok.UpdateInventoryRequest{
-		ProductID: sku.Product.TikTokProductID,
+		ProductID: product.TikTokProductID,
 		SKUs: []tiktok.UpdateSKUInventory{
 			{
 				ID: *sku.TikTokSKUID,
@@ -83,20 +87,28 @@ func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, sho
 	sku.SyncedAt = &now
 	database.DB.Save(&sku)
 
-	log.Printf("Synced inventory to TikTok: SKU %s, qty=%d", sku.SellerSKU, sku.Quantity)
+	logger.Info("synced inventory to TikTok",
+		zap.String("seller_sku", sku.SellerSKU),
+		zap.Int("quantity", sku.Quantity))
 	return nil
 }
 
 // SyncProductInventoryToTikTok - Đồng bộ tồn kho tất cả SKUs của 1 product
 func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context, shopID uint, shopCipher string, productID uint) (int, error) {
 	var product models.Product
-	if err := database.DB.Preload("SKUs").First(&product, productID).Error; err != nil {
+	if err := database.DB.First(&product, productID).Error; err != nil {
 		return 0, fmt.Errorf("product not found: %w", err)
+	}
+
+	// Load SKUs separately (gorm:"-" prevents Preload)
+	var skus []models.SKU
+	if err := database.DB.Where("product_id = ?", productID).Find(&skus).Error; err != nil {
+		return 0, fmt.Errorf("failed to load SKUs: %w", err)
 	}
 
 	// Build batch update request
 	var skuUpdates []tiktok.UpdateSKUInventory
-	for _, sku := range product.SKUs {
+	for _, sku := range skus {
 		if sku.TikTokSKUID == nil {
 			continue // Skip SKUs not pushed yet
 		}
@@ -112,7 +124,7 @@ func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context,
 	}
 
 	if len(skuUpdates) == 0 {
-		log.Printf("No SKUs to sync for product %d", productID)
+		logger.Debug("no SKUs to sync for product", zap.Uint("product_id", productID))
 		return 0, nil
 	}
 
@@ -134,7 +146,9 @@ func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context,
 		}
 	}
 
-	log.Printf("Synced inventory for product %d: %d SKUs", productID, len(skuUpdates))
+	logger.Info("synced inventory for product",
+		zap.Uint("product_id", productID),
+		zap.Int("sku_count", len(skuUpdates)))
 	return len(skuUpdates), nil
 }
 
@@ -250,7 +264,7 @@ func (s *InventorySyncService) GetInventoryStats(ctx context.Context, shopID uin
 func (s *InventorySyncService) GetSKUsByStatus(ctx context.Context, shopID uint, saleStatus models.SKUSaleStatus, limit int) ([]models.SKU, error) {
 	var skus []models.SKU
 
-	query := database.DB.Preload("Product").
+	query := database.DB.
 		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
 		Where("products.shop_id = ?", shopID).
 		Where("skus.sale_status = ?", saleStatus).
@@ -260,6 +274,11 @@ func (s *InventorySyncService) GetSKUsByStatus(ctx context.Context, shopID uint,
 		query = query.Limit(limit)
 	}
 
-	err := query.Find(&skus).Error
-	return skus, err
+	if err := query.Find(&skus).Error; err != nil {
+		return nil, err
+	}
+
+	// Load products separately if needed (gorm:"-" prevents Preload)
+	// For now, we return SKUs without preloaded Product
+	return skus, nil
 }

@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"go.uber.org/zap"
+
+	"github.com/user/sync-tiktok-mps/internal/logger"
 )
 
 type ProductsAPI struct {
@@ -256,4 +260,86 @@ func (p *ProductsAPI) DeactivateProducts(ctx context.Context, shopID uint, shopC
 	})
 
 	return err
+}
+
+// =============================================================================
+// PARTIAL EDIT PRODUCT - Thêm/Sửa SKU
+// =============================================================================
+
+type PartialEditProductRequest struct {
+	SKUs []PartialEditSKU `json:"skus"`
+}
+
+type PartialEditSKU struct {
+	ID              string                  `json:"id,omitempty"`                    // Có ID = sửa SKU, không có = tạo mới
+	SellerSKU       string                  `json:"seller_sku"`                      // Số điện thoại
+	SalesAttributes []PartialEditAttribute  `json:"sales_attributes,omitempty"`      // Omit nếu nil/empty
+	Price           PartialEditPrice        `json:"price"`
+	Inventory       []PartialEditInventory  `json:"inventory"`
+}
+
+type PartialEditAttribute struct {
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	ValueID   string `json:"value_id,omitempty"`
+	ValueName string `json:"value_name,omitempty"`
+}
+
+type PartialEditPrice struct {
+	Amount    string `json:"amount,omitempty"`
+	Currency  string `json:"currency"`
+	SalePrice string `json:"sale_price,omitempty"`
+}
+
+type PartialEditInventory struct {
+	WarehouseID string `json:"warehouse_id"`
+	Quantity    int    `json:"quantity"`
+}
+
+type PartialEditProductResponse struct {
+	ProductID string              `json:"product_id"`
+	SKUs      []PartialEditSKURes `json:"skus"`
+}
+
+type PartialEditSKURes struct {
+	ID        string `json:"id"`
+	SellerSKU string `json:"seller_sku"`
+}
+
+// PartialEditProduct updates SKUs of a product using Partial Edit API
+// NOTE: Must include ALL existing SKUs + new SKUs, otherwise missing SKUs will be DELETED
+func (p *ProductsAPI) PartialEditProduct(ctx context.Context, shopID uint, shopCipher, productID string, req *PartialEditProductRequest) (*PartialEditProductResponse, error) {
+	log := logger.Log.Named("tiktok_api")
+
+	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("partial edit request",
+		zap.String("product_id", productID),
+		zap.Int("sku_count", len(req.SKUs)))
+
+	resp, err := p.client.Request(ctx, http.MethodPost, fmt.Sprintf("/product/202309/products/%s/partial_edit", productID), nil, &RequestOption{
+		AccessToken: accessToken,
+		ShopCipher:  shopCipher,
+		Body:        req,
+	})
+	if err != nil {
+		log.Error("partial edit failed",
+			zap.String("product_id", productID),
+			zap.Error(err))
+		return nil, err
+	}
+
+	var result PartialEditProductResponse
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse partial edit response: %w", err)
+	}
+
+	log.Info("partial edit success",
+		zap.String("product_id", productID),
+		zap.Int("returned_skus", len(result.SKUs)))
+
+	return &result, nil
 }

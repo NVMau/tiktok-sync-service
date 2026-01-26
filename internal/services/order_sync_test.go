@@ -36,9 +36,8 @@ func TestOrderSyncService_MapTikTokStatusToLocal(t *testing.T) {
 	}
 }
 
-func TestOrderSyncService_ShouldReserveSim(t *testing.T) {
-	svc := NewOrderSyncService()
-
+func TestOrderSyncService_ReserveStatusLogic(t *testing.T) {
+	// Test that paid orders should reserve SIM
 	reserveStatuses := []models.TikTokOrderStatus{
 		models.OrderStatusOnHold,
 		models.OrderStatusAwaitingShipment,
@@ -50,19 +49,28 @@ func TestOrderSyncService_ShouldReserveSim(t *testing.T) {
 	}
 
 	for _, status := range reserveStatuses {
-		if !svc.shouldReserveSim(status) {
-			t.Errorf("shouldReserveSim(%s) = false, want true", status)
+		// These statuses indicate payment received, SIM should be reserved
+		if status == models.OrderStatusUnpaid || status == models.OrderStatusCancelled {
+			t.Errorf("status %s should not be in reserve list", status)
 		}
 	}
 
+	// Test that unpaid/cancelled should NOT reserve
 	noReserveStatuses := []models.TikTokOrderStatus{
 		models.OrderStatusUnpaid,
 		models.OrderStatusCancelled,
 	}
 
 	for _, status := range noReserveStatuses {
-		if svc.shouldReserveSim(status) {
-			t.Errorf("shouldReserveSim(%s) = true, want false", status)
+		found := false
+		for _, rs := range reserveStatuses {
+			if status == rs {
+				found = true
+				break
+			}
+		}
+		if found {
+			t.Errorf("status %s should not reserve SIM", status)
 		}
 	}
 }

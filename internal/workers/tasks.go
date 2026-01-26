@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
 	"github.com/user/sync-tiktok-mps/internal/database"
+	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/services"
 	"github.com/user/sync-tiktok-mps/internal/tiktok"
@@ -34,7 +35,9 @@ func HandleProcessWebhook(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to parse task payload: %w", err)
 	}
 
-	log.Printf("Processing webhook event: id=%d, type=%s", payload.EventID, payload.EventType)
+	logger.Info("processing webhook event",
+		zap.Uint("event_id", payload.EventID),
+		zap.String("event_type", payload.EventType))
 
 	var event models.WebhookEvent
 	if err := database.DB.First(&event, payload.EventID).Error; err != nil {
@@ -42,7 +45,7 @@ func HandleProcessWebhook(ctx context.Context, task *asynq.Task) error {
 	}
 
 	if event.ProcessStatus == models.EventStatusProcessed {
-		log.Printf("Event %d already processed, skipping", payload.EventID)
+		logger.Debug("event already processed, skipping", zap.Uint("event_id", payload.EventID))
 		return nil
 	}
 
@@ -53,7 +56,7 @@ func HandleProcessWebhook(ctx context.Context, task *asynq.Task) error {
 	case "PACKAGE_UPDATE":
 		processErr = processPackageEvent(ctx, &event)
 	default:
-		log.Printf("Unknown event type: %s, marking as processed", payload.EventType)
+		logger.Warn("unknown event type, marking as processed", zap.String("event_type", payload.EventType))
 	}
 
 	now := time.Now()
@@ -69,7 +72,7 @@ func HandleProcessWebhook(ctx context.Context, task *asynq.Task) error {
 	event.ProcessedAt = &now
 	database.DB.Save(&event)
 
-	log.Printf("Webhook event %d processed successfully", payload.EventID)
+	logger.Info("webhook event processed successfully", zap.Uint("event_id", payload.EventID))
 	return nil
 }
 
@@ -87,7 +90,9 @@ func processOrderEvent(ctx context.Context, event *models.WebhookEvent) error {
 	}
 
 	data := webhookPayload.Data
-	log.Printf("Processing order event: order_id=%s, status=%s", data.OrderID, data.OrderStatus)
+	logger.Info("processing order event",
+		zap.String("order_id", data.OrderID),
+		zap.String("order_status", data.OrderStatus))
 
 	var shop models.Shop
 	if err := database.DB.First(&shop, event.ShopID).Error; err != nil {
@@ -105,10 +110,10 @@ func processOrderEvent(ctx context.Context, event *models.WebhookEvent) error {
 		return fmt.Errorf("failed to get order detail: %w", err)
 	}
 
-	return upsertOrder(shop.ID, orderDetail, event.Payload)
+	return upsertOrder(shop.ID, shop.ShopID, orderDetail, event.Payload)
 }
 
-func upsertOrder(shopID uint, detail *tiktok.OrderDetailResponse, rawPayload []byte) error {
+func upsertOrder(shopID uint, tiktokShopID string, detail *tiktok.OrderDetailResponse, rawPayload []byte) error {
 	var placedAt, paidAt *time.Time
 	if detail.CreateTime > 0 {
 		t := time.Unix(detail.CreateTime, 0)
@@ -131,6 +136,7 @@ func upsertOrder(shopID uint, detail *tiktok.OrderDetailResponse, rawPayload []b
 
 	order := models.Order{
 		ShopID:            shopID,
+		TikTokShopID:      tiktokShopID,
 		TikTokOrderID:     detail.ID,
 		TikTokOrderStatus: models.TikTokOrderStatus(detail.Status),
 		PaymentStatus:     detail.PaymentMethodName,
@@ -173,14 +179,16 @@ func upsertOrder(shopID uint, detail *tiktok.OrderDetailResponse, rawPayload []b
 			FirstOrCreate(&orderItem)
 	}
 
-	log.Printf("Order upserted: tiktok_order_id=%s, status=%s, items=%d",
-		detail.ID, detail.Status, len(detail.LineItems))
+	logger.Info("order upserted",
+		zap.String("tiktok_order_id", detail.ID),
+		zap.String("status", detail.Status),
+		zap.Int("items_count", len(detail.LineItems)))
 
 	return nil
 }
 
 func processPackageEvent(ctx context.Context, event *models.WebhookEvent) error {
-	log.Printf("Processing package event: %d", event.ID)
+	logger.Info("processing package event", zap.Uint("event_id", event.ID))
 	return nil
 }
 
@@ -196,7 +204,7 @@ func HandleSyncInventory(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	log.Printf("Syncing inventory for SKU: %d", payload.SKUID)
+	logger.Info("syncing inventory for SKU", zap.Uint("sku_id", payload.SKUID))
 
 	cfg := config.Get()
 	inventoryService := services.NewInventorySyncService(cfg)
@@ -222,7 +230,7 @@ func HandleShipPackage(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	log.Printf("Shipping package for order: %s", payload.TikTokOrderID)
+	logger.Info("shipping package for order", zap.String("tiktok_order_id", payload.TikTokOrderID))
 
 	cfg := config.Get()
 	fulfillmentService := services.NewFulfillmentSyncService(cfg)
@@ -243,7 +251,7 @@ func HandleShipPackage(ctx context.Context, task *asynq.Task) error {
 }
 
 func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
-	log.Println("Running order reconciliation...")
+	logger.Info("running order reconciliation")
 
 	cfg := config.Get()
 	client := tiktok.NewClient(cfg)
@@ -259,17 +267,21 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 	for _, shop := range shops {
 		var token models.OAuthToken
 		if err := database.DB.Where("shop_id = ?", shop.ID).First(&token).Error; err != nil {
-			log.Printf("No token for shop %s, skipping", shop.ShopID)
+			logger.Warn("no token for shop, skipping", zap.String("shop_id", shop.ShopID))
 			continue
 		}
 
 		orders, err := ordersAPI.GetRecentOrders(ctx, shop.ID, "", 24*time.Hour)
 		if err != nil {
-			log.Printf("Failed to get recent orders for shop %s: %v", shop.ShopID, err)
+			logger.Error("failed to get recent orders for shop",
+				zap.String("shop_id", shop.ShopID),
+				zap.Error(err))
 			continue
 		}
 
-		log.Printf("Reconciling %d orders for shop %s", len(orders), shop.ShopID)
+		logger.Info("reconciling orders for shop",
+			zap.Int("order_count", len(orders)),
+			zap.String("shop_id", shop.ShopID))
 
 		for _, orderSummary := range orders {
 			var existingOrder models.Order
@@ -280,19 +292,25 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 					existingOrder.TikTokOrderStatus = models.TikTokOrderStatus(orderSummary.Status)
 					existingOrder.SyncState = models.SyncStateNew
 					database.DB.Save(&existingOrder)
-					log.Printf("Updated order status: %s -> %s", orderSummary.ID, orderSummary.Status)
+					logger.Info("updated order status",
+						zap.String("order_id", orderSummary.ID),
+						zap.String("new_status", orderSummary.Status))
 				}
 				continue
 			}
 
 			orderDetail, err := ordersAPI.GetOrderDetail(ctx, shop.ID, "", orderSummary.ID)
 			if err != nil {
-				log.Printf("Failed to get order detail %s: %v", orderSummary.ID, err)
+				logger.Error("failed to get order detail",
+					zap.String("order_id", orderSummary.ID),
+					zap.Error(err))
 				continue
 			}
 
-			if err := upsertOrder(shop.ID, orderDetail, nil); err != nil {
-				log.Printf("Failed to upsert order %s: %v", orderSummary.ID, err)
+			if err := upsertOrder(shop.ID, shop.ShopID, orderDetail, nil); err != nil {
+				logger.Error("failed to upsert order",
+					zap.String("order_id", orderSummary.ID),
+					zap.Error(err))
 				continue
 			}
 
@@ -307,7 +325,7 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 		orderSyncService.SyncOrderToLocal(ctx, &order)
 	}
 
-	log.Println("Order reconciliation completed")
+	logger.Info("order reconciliation completed")
 	return nil
 }
 
@@ -323,7 +341,7 @@ func HandleSyncAllInventory(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	log.Printf("Syncing all inventory for product: %d", payload.ProductID)
+	logger.Info("syncing all inventory for product", zap.Uint("product_id", payload.ProductID))
 
 	cfg := config.Get()
 	inventoryService := services.NewInventorySyncService(cfg)
@@ -333,6 +351,8 @@ func HandleSyncAllInventory(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to sync inventory: %w", err)
 	}
 
-	log.Printf("Synced %d SKUs for product %d", count, payload.ProductID)
+	logger.Info("synced SKUs for product",
+		zap.Int("sku_count", count),
+		zap.Uint("product_id", payload.ProductID))
 	return nil
 }

@@ -107,8 +107,9 @@ func TestWebhookHandler_ValidateTimestamp(t *testing.T) {
 }
 
 func TestWebhookPayload_Parse(t *testing.T) {
+	// TikTok webhook uses integer type codes
 	jsonData := `{
-		"type": "ORDER_STATUS_CHANGE",
+		"type": 1,
 		"shop_id": "7369437808455026474",
 		"timestamp": 1704067200,
 		"data": {
@@ -123,8 +124,8 @@ func TestWebhookPayload_Parse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse payload: %v", err)
 	}
-	if payload.Type != "ORDER_STATUS_CHANGE" {
-		t.Errorf("Type = %s", payload.Type)
+	if payload.Type != 1 {
+		t.Errorf("Type = %d, want 1", payload.Type)
 	}
 	if payload.ShopID != "7369437808455026474" {
 		t.Errorf("ShopID = %s", payload.ShopID)
@@ -134,6 +135,28 @@ func TestWebhookPayload_Parse(t *testing.T) {
 	}
 	if payload.Data == nil {
 		t.Error("Data is nil")
+	}
+}
+
+func TestGetWebhookTypeName(t *testing.T) {
+	tests := []struct {
+		code int
+		want string
+	}{
+		{1, "ORDER_STATUS_CHANGE"},
+		{2, "REVERSE_STATUS_UPDATE"},
+		{3, "RECIPIENT_ADDRESS_UPDATE"},
+		{4, "PACKAGE_UPDATE"},
+		{999, "UNKNOWN_999"}, // Unknown codes return UNKNOWN_{code}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := getWebhookTypeName(tt.code)
+			if got != tt.want {
+				t.Errorf("getWebhookTypeName(%d) = %s, want %s", tt.code, got, tt.want)
+			}
+		})
 	}
 }
 

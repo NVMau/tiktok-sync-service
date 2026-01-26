@@ -2,10 +2,12 @@ package workers
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/hibiken/asynq"
+	"go.uber.org/zap"
+
+	"github.com/user/sync-tiktok-mps/internal/logger"
 )
 
 const (
@@ -33,7 +35,9 @@ func NewAsynqServer(redisAddr string) *asynq.Server {
 				return time.Duration(n*n) * time.Second
 			},
 			ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
-				log.Printf("Error processing task %s: %v", task.Type(), err)
+				logger.Error("task processing failed",
+					zap.String("task_type", task.Type()),
+					zap.Error(err))
 			}),
 		},
 	)
@@ -61,6 +65,6 @@ func RegisterScheduledTasks(scheduler *asynq.Scheduler) error {
 		return err
 	}
 
-	log.Println("Scheduled tasks registered: order reconciliation every 6 hours")
+	logger.Info("scheduled tasks registered: order reconciliation every 6 hours")
 	return nil
 }
