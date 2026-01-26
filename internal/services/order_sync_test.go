@@ -1,0 +1,120 @@
+package services
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/user/sync-tiktok-mps/internal/models"
+)
+
+func TestOrderSyncService_MapTikTokStatusToLocal(t *testing.T) {
+	svc := NewOrderSyncService()
+
+	tests := []struct {
+		tiktokStatus models.TikTokOrderStatus
+		want         LocalOrderStatus
+	}{
+		{models.OrderStatusUnpaid, LocalStatusPendingPayment},
+		{models.OrderStatusOnHold, LocalStatusPaidHold},
+		{models.OrderStatusAwaitingShipment, LocalStatusReadyToShip},
+		{models.OrderStatusPartiallyShipping, LocalStatusShippedAwaitingPickup},
+		{models.OrderStatusAwaitingCollection, LocalStatusShippedAwaitingPickup},
+		{models.OrderStatusInTransit, LocalStatusInTransit},
+		{models.OrderStatusDelivered, LocalStatusDelivered},
+		{models.OrderStatusCompleted, LocalStatusCompleted},
+		{models.OrderStatusCancelled, LocalStatusCancelled},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.tiktokStatus), func(t *testing.T) {
+			got := svc.MapTikTokStatusToLocal(tt.tiktokStatus)
+			if got != tt.want {
+				t.Errorf("MapTikTokStatusToLocal(%s) = %s, want %s",
+					tt.tiktokStatus, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOrderSyncService_ShouldReserveSim(t *testing.T) {
+	svc := NewOrderSyncService()
+
+	reserveStatuses := []models.TikTokOrderStatus{
+		models.OrderStatusOnHold,
+		models.OrderStatusAwaitingShipment,
+		models.OrderStatusPartiallyShipping,
+		models.OrderStatusAwaitingCollection,
+		models.OrderStatusInTransit,
+		models.OrderStatusDelivered,
+		models.OrderStatusCompleted,
+	}
+
+	for _, status := range reserveStatuses {
+		if !svc.shouldReserveSim(status) {
+			t.Errorf("shouldReserveSim(%s) = false, want true", status)
+		}
+	}
+
+	noReserveStatuses := []models.TikTokOrderStatus{
+		models.OrderStatusUnpaid,
+		models.OrderStatusCancelled,
+	}
+
+	for _, status := range noReserveStatuses {
+		if svc.shouldReserveSim(status) {
+			t.Errorf("shouldReserveSim(%s) = true, want false", status)
+		}
+	}
+}
+
+func TestLocalOrderStatus_Values(t *testing.T) {
+	statuses := []LocalOrderStatus{
+		LocalStatusPendingPayment,
+		LocalStatusPaidHold,
+		LocalStatusReadyToShip,
+		LocalStatusShippedAwaitingPickup,
+		LocalStatusInTransit,
+		LocalStatusDelivered,
+		LocalStatusCompleted,
+		LocalStatusCancelled,
+	}
+
+	expectedValues := []string{
+		"PENDING_PAYMENT",
+		"PAID_HOLD",
+		"READY_TO_SHIP",
+		"SHIPPED_AWAITING_PICKUP",
+		"IN_TRANSIT",
+		"DELIVERED",
+		"COMPLETED",
+		"CANCELLED",
+	}
+
+	for i, status := range statuses {
+		if string(status) != expectedValues[i] {
+			t.Errorf("Status %d = %s, want %s", i, status, expectedValues[i])
+		}
+	}
+}
+
+func TestAppendError(t *testing.T) {
+	payload := []byte(`{"order_id":"123"}`)
+	result := appendError(payload, "test error")
+
+	expectedContains := `"sync_errors"`
+	if !strings.Contains(string(result), expectedContains) {
+		t.Errorf("appendError result should contain %s, got %s", expectedContains, string(result))
+	}
+
+	result2 := appendError(result, "second error")
+	if string(result2) == "" {
+		t.Error("appendError second call returned empty result")
+	}
+}
+
+func TestAppendError_NilPayload(t *testing.T) {
+	result := appendError(nil, "test error")
+	if result == nil {
+		t.Error("appendError(nil) should not return nil")
+	}
+}
