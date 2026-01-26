@@ -66,7 +66,7 @@ func (s *ProductSyncService) SyncProductsFromTikTok(ctx context.Context, shopID 
 	for _, p := range resp.Products {
 		product := models.Product{
 			ShopID:          shopID,
-			TikTokShopID:    shop.ShopID, // Lưu TikTok shop ID thật để đảm bảo đồng bộ
+			TikTokShopID:    shop.ShopID, // Store actual TikTok shop ID to ensure sync
 			TikTokProductID: p.ID,
 			Title:           p.Title,
 			Status:          models.ProductStatus(p.Status),
@@ -168,7 +168,7 @@ func (s *ProductSyncService) upsertSKUFromTikTok(productID uint, tikSKU *tiktok.
 
 	// Determine seller_sku with fallback priority:
 	// 1. seller_sku from TikTok (if not empty)
-	// 2. sales_attributes[0].value_name (số điện thoại từ variant "CHỌN SỐ")
+	// 2. sales_attributes[0].value_name (phone number from "SELECT NUMBER" variant)
 	// 3. tik_tok_sku_id as last resort
 	sellerSKU := tikSKU.SellerSku
 	if sellerSKU == "" && len(tikSKU.SalesAttributes) > 0 {
@@ -598,7 +598,7 @@ func (s *ProductSyncService) buildPartialEditRequest(detail *tiktok.ProductDetai
 		if variantAttr == nil {
 			s.log.Warn("product has no variant, cannot add new SKU",
 				zap.String("seller_sku", sku.SellerSKU))
-			s.markSKUAsFailed(&sku, "Product không có variant, cần setup 'CHỌN SỐ' trên TikTok trước")
+			s.markSKUAsFailed(&sku, "Product has no variant, need to setup 'SELECT NUMBER' on TikTok first")
 			continue
 		}
 

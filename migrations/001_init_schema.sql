@@ -1,13 +1,11 @@
 -- ============================================================================
--- TikTok Shop Sync - Database Schema
--- Generated from GORM AutoMigrate (exact match)
+-- TikTok Shop Sync - Database Schema (Consolidated)
 -- ============================================================================
 
--- Create schema
 CREATE SCHEMA IF NOT EXISTS tiktok_sync;
 
 -- ============================================================================
--- SHOPS - Thông tin TikTok Shop
+-- SHOPS - TikTok Shop Information
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.shops (
     id              BIGSERIAL PRIMARY KEY,
@@ -20,14 +18,14 @@ CREATE TABLE IF NOT EXISTS tiktok_sync.shops (
     updated_at      TIMESTAMP WITH TIME ZONE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_sync_shops_shop_id ON tiktok_sync.shops(shop_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shops_shop_id ON tiktok_sync.shops(shop_id);
 
 -- ============================================================================
--- OAUTH_TOKENS - Access/Refresh tokens cho mỗi shop
+-- OAUTH_TOKENS - Access/Refresh tokens for each shop
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.oauth_tokens (
     id              BIGSERIAL PRIMARY KEY,
-    shop_id         BIGINT NOT NULL,
+    shop_id         BIGINT NOT NULL REFERENCES tiktok_sync.shops(id),
     access_token    VARCHAR(500) NOT NULL,
     refresh_token   VARCHAR(500) NOT NULL,
     expires_at      TIMESTAMP WITH TIME ZONE,
@@ -35,14 +33,15 @@ CREATE TABLE IF NOT EXISTS tiktok_sync.oauth_tokens (
     updated_at      TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_oauth_tokens_shop_id ON tiktok_sync.oauth_tokens(shop_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_shop_id ON tiktok_sync.oauth_tokens(shop_id);
 
 -- ============================================================================
--- PRODUCTS - Sản phẩm trên TikTok Shop
+-- PRODUCTS - Products on TikTok Shop
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.products (
     id                  BIGSERIAL PRIMARY KEY,
-    shop_id             BIGINT NOT NULL,
+    shop_id             BIGINT NOT NULL REFERENCES tiktok_sync.shops(id),
+    tiktok_shop_id      VARCHAR(100) NOT NULL,
     tik_tok_product_id  VARCHAR(100) NOT NULL,
     title               VARCHAR(500) NOT NULL,
     description         TEXT,
@@ -53,19 +52,22 @@ CREATE TABLE IF NOT EXISTS tiktok_sync.products (
     raw_data            JSONB,
     synced_at           TIMESTAMP WITH TIME ZONE,
     created_at          TIMESTAMP WITH TIME ZONE,
-    updated_at          TIMESTAMP WITH TIME ZONE
+    updated_at          TIMESTAMP WITH TIME ZONE,
+    
+    CONSTRAINT chk_products_sku_count_nonneg CHECK (sku_count >= 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_products_shop_id ON tiktok_sync.products(shop_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_products_status ON tiktok_sync.products(status);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_sync_products_tik_tok_product_id ON tiktok_sync.products(tik_tok_product_id);
+CREATE INDEX IF NOT EXISTS idx_products_shop_id ON tiktok_sync.products(shop_id);
+CREATE INDEX IF NOT EXISTS idx_products_tiktok_shop_id ON tiktok_sync.products(tiktok_shop_id);
+CREATE INDEX IF NOT EXISTS idx_products_status ON tiktok_sync.products(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_products_tik_tok_product_id ON tiktok_sync.products(tik_tok_product_id);
 
 -- ============================================================================
--- SKUS - Mỗi SKU = 1 số điện thoại cụ thể
+-- SKUS - Each SKU = 1 specific phone number
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.skus (
     id                  BIGSERIAL PRIMARY KEY,
-    product_id          BIGINT NOT NULL,
+    product_id          BIGINT NOT NULL REFERENCES tiktok_sync.products(id),
     tik_tok_sku_id      VARCHAR(100),
     seller_sku          VARCHAR(100) NOT NULL,
     price               NUMERIC(15,2) NOT NULL,
@@ -85,21 +87,27 @@ CREATE TABLE IF NOT EXISTS tiktok_sync.skus (
     -- Timestamps
     synced_at           TIMESTAMP WITH TIME ZONE,
     created_at          TIMESTAMP WITH TIME ZONE,
-    updated_at          TIMESTAMP WITH TIME ZONE
+    updated_at          TIMESTAMP WITH TIME ZONE,
+    
+    CONSTRAINT chk_skus_quantity_0_1 CHECK (quantity IN (0, 1)),
+    CONSTRAINT chk_skus_push_attempts_nonneg CHECK (push_attempts >= 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_skus_product_id ON tiktok_sync.skus(product_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_skus_tik_tok_sk_uid ON tiktok_sync.skus(tik_tok_sku_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_sync_skus_seller_sku ON tiktok_sync.skus(seller_sku);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_skus_sync_status ON tiktok_sync.skus(sync_status);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_skus_sale_status ON tiktok_sync.skus(sale_status);
+CREATE INDEX IF NOT EXISTS idx_skus_product_id ON tiktok_sync.skus(product_id);
+CREATE INDEX IF NOT EXISTS idx_skus_seller_sku ON tiktok_sync.skus(seller_sku);
+CREATE INDEX IF NOT EXISTS idx_skus_sync_status ON tiktok_sync.skus(sync_status);
+CREATE INDEX IF NOT EXISTS idx_skus_sale_status ON tiktok_sync.skus(sale_status);
+-- tik_tok_sku_id unique only when NOT NULL (partial unique)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skus_tik_tok_sku_id_unique 
+    ON tiktok_sync.skus(tik_tok_sku_id) WHERE tik_tok_sku_id IS NOT NULL;
 
 -- ============================================================================
--- ORDERS - Mirror orders từ TikTok
+-- ORDERS - Mirror orders from TikTok
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.orders (
     id                      BIGSERIAL PRIMARY KEY,
-    shop_id                 BIGINT NOT NULL,
+    shop_id                 BIGINT NOT NULL REFERENCES tiktok_sync.shops(id),
+    tiktok_shop_id          VARCHAR(100) NOT NULL,
     tik_tok_order_id        VARCHAR(100) NOT NULL,
     tik_tok_order_status    VARCHAR(50),
     payment_status          VARCHAR(50),
@@ -118,60 +126,62 @@ CREATE TABLE IF NOT EXISTS tiktok_sync.orders (
     updated_at              TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_orders_shop_id ON tiktok_sync.orders(shop_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_sync_orders_tik_tok_order_id ON tiktok_sync.orders(tik_tok_order_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_orders_tik_tok_order_status ON tiktok_sync.orders(tik_tok_order_status);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_orders_sync_state ON tiktok_sync.orders(sync_state);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_orders_local_order_id ON tiktok_sync.orders(local_order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_shop_id ON tiktok_sync.orders(shop_id);
+CREATE INDEX IF NOT EXISTS idx_orders_tiktok_shop_id ON tiktok_sync.orders(tiktok_shop_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tik_tok_order_id ON tiktok_sync.orders(tik_tok_order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_tik_tok_order_status ON tiktok_sync.orders(tik_tok_order_status);
+CREATE INDEX IF NOT EXISTS idx_orders_sync_state ON tiktok_sync.orders(sync_state);
+CREATE INDEX IF NOT EXISTS idx_orders_local_order_id ON tiktok_sync.orders(local_order_id);
 
 -- ============================================================================
--- ORDER_ITEMS - Chi tiết items trong order
+-- ORDER_ITEMS - Order item details
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.order_items (
     id                      BIGSERIAL PRIMARY KEY,
-    order_id                BIGINT NOT NULL,
-    sk_uid                  BIGINT,
+    order_id                BIGINT NOT NULL REFERENCES tiktok_sync.orders(id),
+    sku_id                  BIGINT REFERENCES tiktok_sync.skus(id),
     tik_tok_order_item_id   VARCHAR(100),
     tik_tok_product_id      VARCHAR(100),
-    tik_tok_sk_uid          VARCHAR(100),
+    tik_tok_sku_id          VARCHAR(100),
     seller_sku              VARCHAR(100),
     qty                     BIGINT NOT NULL DEFAULT 1,
     price                   NUMERIC(15,2),
     created_at              TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_order_items_order_id ON tiktok_sync.order_items(order_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_order_items_sk_uid ON tiktok_sync.order_items(sk_uid);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_order_items_tik_tok_order_item_id ON tiktok_sync.order_items(tik_tok_order_item_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_order_items_seller_sku ON tiktok_sync.order_items(seller_sku);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON tiktok_sync.order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_sku_id ON tiktok_sync.order_items(sku_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_tik_tok_order_item_id ON tiktok_sync.order_items(tik_tok_order_item_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_tik_tok_sku_id ON tiktok_sync.order_items(tik_tok_sku_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_seller_sku ON tiktok_sync.order_items(seller_sku);
 
 -- ============================================================================
 -- WEBHOOK_EVENTS - Inbox webhook events (idempotent)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.webhook_events (
     id                  BIGSERIAL PRIMARY KEY,
-    shop_id             BIGINT NOT NULL,
+    shop_id             BIGINT NOT NULL REFERENCES tiktok_sync.shops(id),
     event_id            VARCHAR(255) NOT NULL,
     event_type          VARCHAR(100),
     received_at         TIMESTAMP WITH TIME ZONE,
     payload             JSONB,
-    signature_valid     BOOLEAN,
+    signature_valid     BOOLEAN DEFAULT false,
     processed_at        TIMESTAMP WITH TIME ZONE,
     process_status      VARCHAR(50) DEFAULT 'pending',
     error               TEXT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_sync_webhook_events_event_id ON tiktok_sync.webhook_events(event_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_webhook_events_shop_id ON tiktok_sync.webhook_events(shop_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_webhook_events_event_type ON tiktok_sync.webhook_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_webhook_events_process_status ON tiktok_sync.webhook_events(process_status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_event_id ON tiktok_sync.webhook_events(event_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_shop_id ON tiktok_sync.webhook_events(shop_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type ON tiktok_sync.webhook_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_process_status ON tiktok_sync.webhook_events(process_status);
 
 -- ============================================================================
--- SYNC_JOBS - Outbox jobs để push lên TikTok
+-- SYNC_JOBS - Outbox jobs to push to TikTok
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tiktok_sync.sync_jobs (
     id              BIGSERIAL PRIMARY KEY,
-    shop_id         BIGINT NOT NULL,
+    shop_id         BIGINT NOT NULL REFERENCES tiktok_sync.shops(id),
     job_type        VARCHAR(50) NOT NULL,
     dedupe_key      VARCHAR(255),
     payload         JSONB,
@@ -183,11 +193,13 @@ CREATE TABLE IF NOT EXISTS tiktok_sync.sync_jobs (
     updated_at      TIMESTAMP WITH TIME ZONE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tiktok_sync_sync_jobs_dedupe_key ON tiktok_sync.sync_jobs(dedupe_key);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_sync_jobs_shop_id ON tiktok_sync.sync_jobs(shop_id);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_sync_jobs_job_type ON tiktok_sync.sync_jobs(job_type);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_sync_jobs_status ON tiktok_sync.sync_jobs(status);
-CREATE INDEX IF NOT EXISTS idx_tiktok_sync_sync_jobs_run_after ON tiktok_sync.sync_jobs(run_after);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_jobs_dedupe_key ON tiktok_sync.sync_jobs(dedupe_key);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_shop_id ON tiktok_sync.sync_jobs(shop_id);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_job_type ON tiktok_sync.sync_jobs(job_type);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON tiktok_sync.sync_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_run_after ON tiktok_sync.sync_jobs(run_after);
+-- Composite index for worker query
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_run_after ON tiktok_sync.sync_jobs(status, run_after);
 
 -- ============================================================================
 -- COMMENTS

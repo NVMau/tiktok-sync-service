@@ -15,12 +15,12 @@ import (
 )
 
 // =============================================================================
-// InventorySyncService - Quản lý đồng bộ tồn kho với TikTok
+// InventorySyncService - Manages inventory synchronization with TikTok
 // =============================================================================
-// Trong business SIM số đẹp:
-//   - Mỗi SKU có quantity = 0 hoặc 1 (vì số điện thoại là unique)
-//   - Khi bán: quantity 1 → 0
-//   - Không có concept "restock" như hàng hóa thông thường
+// In the premium SIM card business:
+//   - Each SKU has quantity = 0 or 1 (because phone numbers are unique)
+//   - When sold: quantity 1 → 0
+//   - No "restock" concept like regular merchandise
 
 type InventorySyncService struct {
 	cfg          *config.Config
@@ -45,7 +45,7 @@ func NewInventorySyncService(cfg *config.Config) *InventorySyncService {
 // SYNC TO TIKTOK
 // =============================================================================
 
-// SyncSKUInventoryToTikTok - Đồng bộ tồn kho của 1 SKU lên TikTok
+// SyncSKUInventoryToTikTok - Sync inventory of a single SKU to TikTok
 func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, shopID uint, shopCipher string, skuID uint) error {
 	var sku models.SKU
 	if err := database.DB.First(&sku, skuID).Error; err != nil {
@@ -93,7 +93,7 @@ func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, sho
 	return nil
 }
 
-// SyncProductInventoryToTikTok - Đồng bộ tồn kho tất cả SKUs của 1 product
+// SyncProductInventoryToTikTok - Sync inventory of all SKUs for a product
 func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context, shopID uint, shopCipher string, productID uint) (int, error) {
 	var product models.Product
 	if err := database.DB.First(&product, productID).Error; err != nil {
@@ -156,8 +156,8 @@ func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context,
 // INVENTORY STATE CHANGES
 // =============================================================================
 
-// MarkSKUAsSold - Đánh dấu SKU đã bán (quantity = 0)
-// Gọi khi đơn hàng được COMPLETED
+// MarkSKUAsSold - Mark SKU as sold (quantity = 0)
+// Called when order is COMPLETED
 func (s *InventorySyncService) MarkSKUAsSold(ctx context.Context, skuID uint) error {
 	return database.DB.Model(&models.SKU{}).
 		Where("id = ?", skuID).
@@ -168,8 +168,8 @@ func (s *InventorySyncService) MarkSKUAsSold(ctx context.Context, skuID uint) er
 		}).Error
 }
 
-// ReserveSKU - Đặt trước SKU khi có đơn hàng mới
-// Tránh bán trùng số (double selling)
+// ReserveSKU - Reserve SKU when there is a new order
+// Prevents double selling
 func (s *InventorySyncService) ReserveSKU(ctx context.Context, skuID uint) error {
 	var sku models.SKU
 	if err := database.DB.First(&sku, skuID).Error; err != nil {
@@ -187,7 +187,7 @@ func (s *InventorySyncService) ReserveSKU(ctx context.Context, skuID uint) error
 		}).Error
 }
 
-// ReleaseSKU - Giải phóng SKU khi đơn bị hủy
+// ReleaseSKU - Release SKU when order is cancelled
 func (s *InventorySyncService) ReleaseSKU(ctx context.Context, skuID uint) error {
 	return database.DB.Model(&models.SKU{}).
 		Where("id = ?", skuID).
@@ -202,17 +202,17 @@ func (s *InventorySyncService) ReleaseSKU(ctx context.Context, skuID uint) error
 // STATISTICS
 // =============================================================================
 
-// InventoryStats - Thống kê tồn kho
+// InventoryStats - Inventory statistics
 type InventoryStats struct {
 	TotalSKUs     int64 `json:"total_skus"`
 	AvailableSKUs int64 `json:"available_skus"`
 	ReservedSKUs  int64 `json:"reserved_skus"`
 	SoldSKUs      int64 `json:"sold_skus"`
-	PendingPush   int64 `json:"pending_push"`  // SKU chờ push lên TikTok
-	FailedPush    int64 `json:"failed_push"`   // SKU push thất bại
+	PendingPush   int64 `json:"pending_push"`  // SKUs pending push to TikTok
+	FailedPush    int64 `json:"failed_push"`   // SKUs failed to push
 }
 
-// GetInventoryStats - Lấy thống kê tồn kho của shop
+// GetInventoryStats - Get inventory statistics for a shop
 func (s *InventorySyncService) GetInventoryStats(ctx context.Context, shopID uint) (*InventoryStats, error) {
 	stats := &InventoryStats{}
 
@@ -260,7 +260,7 @@ func (s *InventorySyncService) GetInventoryStats(ctx context.Context, shopID uin
 	return stats, nil
 }
 
-// GetSKUsByStatus - Lấy danh sách SKUs theo trạng thái
+// GetSKUsByStatus - Get list of SKUs by status
 func (s *InventorySyncService) GetSKUsByStatus(ctx context.Context, shopID uint, saleStatus models.SKUSaleStatus, limit int) ([]models.SKU, error) {
 	var skus []models.SKU
 

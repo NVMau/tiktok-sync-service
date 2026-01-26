@@ -263,7 +263,7 @@ func (p *ProductsAPI) DeactivateProducts(ctx context.Context, shopID uint, shopC
 }
 
 // =============================================================================
-// PARTIAL EDIT PRODUCT - Thêm/Sửa SKU
+// PARTIAL EDIT PRODUCT - Add/Edit SKU
 // =============================================================================
 
 type PartialEditProductRequest struct {
@@ -271,9 +271,9 @@ type PartialEditProductRequest struct {
 }
 
 type PartialEditSKU struct {
-	ID              string                  `json:"id,omitempty"`                    // Có ID = sửa SKU, không có = tạo mới
-	SellerSKU       string                  `json:"seller_sku"`                      // Số điện thoại
-	SalesAttributes []PartialEditAttribute  `json:"sales_attributes,omitempty"`      // Omit nếu nil/empty
+	ID              string                  `json:"id,omitempty"`                    // With ID = edit SKU, without = create new
+	SellerSKU       string                  `json:"seller_sku"`                      // Phone number
+	SalesAttributes []PartialEditAttribute  `json:"sales_attributes,omitempty"`      // Omit if nil/empty
 	Price           PartialEditPrice        `json:"price"`
 	Inventory       []PartialEditInventory  `json:"inventory"`
 }

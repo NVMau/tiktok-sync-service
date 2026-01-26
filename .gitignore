@@ -36,3 +36,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Planning docs
+PLAN.md

@@ -14,15 +14,15 @@ import (
 )
 
 // =============================================================================
-// OrderSyncService - Quản lý đồng bộ đơn hàng
+// OrderSyncService - Manages order synchronization
 // =============================================================================
-// Flow xử lý đơn hàng:
-//   1. TikTok gửi webhook ORDER_CREATED hoặc ORDER_STATUS_CHANGE
-//   2. Lưu order vào DB (sync_state = new)
-//   3. Map order_items với SKUs trong DB
-//   4. Reserve SKU khi có đơn hàng (tránh bán trùng)
-//   5. Mark SKU as sold khi đơn COMPLETED
-//   6. Release SKU khi đơn bị CANCELLED
+// Order processing flow:
+//   1. TikTok sends webhook ORDER_CREATED or ORDER_STATUS_CHANGE
+//   2. Save order to DB (sync_state = new)
+//   3. Map order_items with SKUs in DB
+//   4. Reserve SKU when order is placed (prevent double selling)
+//   5. Mark SKU as sold when order is COMPLETED
+//   6. Release SKU when order is CANCELLED
 
 type LocalOrderStatus string
 
@@ -43,7 +43,7 @@ func NewOrderSyncService() *OrderSyncService {
 	return &OrderSyncService{}
 }
 
-// MapTikTokStatusToLocal - Chuyển đổi trạng thái TikTok sang local
+// MapTikTokStatusToLocal - Convert TikTok status to local status
 func (s *OrderSyncService) MapTikTokStatusToLocal(tiktokStatus models.TikTokOrderStatus) LocalOrderStatus {
 	switch tiktokStatus {
 	case models.OrderStatusUnpaid:
@@ -71,7 +71,7 @@ func (s *OrderSyncService) MapTikTokStatusToLocal(tiktokStatus models.TikTokOrde
 // SYNC ORDER
 // =============================================================================
 
-// SyncOrderToLocal - Đồng bộ order từ TikTok vào hệ thống local
+// SyncOrderToLocal - Sync order from TikTok to local system
 func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.Order) error {
 	logger.Info("syncing order to local", zap.String("tiktok_order_id", order.TikTokOrderID))
 
@@ -159,13 +159,13 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 	return nil
 }
 
-// mapOrderItemToSKU - Map order item với SKU trong DB
-// Ưu tiên lookup theo tik_tok_sku_id (chính xác nhất), fallback sang seller_sku
+// mapOrderItemToSKU - Map order item to SKU in DB
+// Priority lookup by tik_tok_sku_id (most accurate), fallback to seller_sku
 func (s *OrderSyncService) mapOrderItemToSKU(ctx context.Context, item *models.OrderItem) error {
 	var sku models.SKU
 	var err error
 
-	// Priority 1: Lookup by tik_tok_sku_id (100% chính xác từ TikTok)
+	// Priority 1: Lookup by tik_tok_sku_id (100% accurate from TikTok)
 	if item.TikTokSKUID != "" {
 		err = database.DB.Where("tik_tok_sku_id = ?", item.TikTokSKUID).First(&sku).Error
 		if err == nil {
@@ -174,7 +174,7 @@ func (s *OrderSyncService) mapOrderItemToSKU(ctx context.Context, item *models.O
 		}
 	}
 
-	// Priority 2: Lookup by seller_sku (số điện thoại)
+	// Priority 2: Lookup by seller_sku (phone number)
 	if item.SellerSKU != "" {
 		err = database.DB.Where("seller_sku = ?", item.SellerSKU).First(&sku).Error
 		if err == nil {
@@ -190,7 +190,7 @@ func (s *OrderSyncService) mapOrderItemToSKU(ctx context.Context, item *models.O
 	return fmt.Errorf("no SKU found for tik_tok_sku_id=%s seller_sku=%s", item.TikTokSKUID, item.SellerSKU)
 }
 
-// shouldReserveSKU - Kiểm tra có nên reserve SKU không
+// shouldReserveSKU - Check if SKU should be reserved
 func (s *OrderSyncService) shouldReserveSKU(status models.TikTokOrderStatus) bool {
 	switch status {
 	case models.OrderStatusOnHold,
@@ -205,7 +205,7 @@ func (s *OrderSyncService) shouldReserveSKU(status models.TikTokOrderStatus) boo
 	}
 }
 
-// reserveSKU - Đặt trước SKU (với transaction lock để tránh race condition)
+// reserveSKU - Reserve SKU (with transaction lock to prevent race condition)
 func (s *OrderSyncService) reserveSKU(ctx context.Context, skuID uint, orderRef string) error {
 	tx := database.DB.Begin()
 	defer func() {
@@ -249,7 +249,7 @@ func (s *OrderSyncService) reserveSKU(ctx context.Context, skuID uint, orderRef 
 	return nil
 }
 
-// markSKUAsSold - Đánh dấu SKU đã bán
+// markSKUAsSold - Mark SKU as sold
 func (s *OrderSyncService) markSKUAsSold(ctx context.Context, skuID uint) error {
 	return database.DB.Model(&models.SKU{}).
 		Where("id = ?", skuID).
@@ -260,7 +260,7 @@ func (s *OrderSyncService) markSKUAsSold(ctx context.Context, skuID uint) error 
 		}).Error
 }
 
-// releaseSKU - Giải phóng SKU khi đơn bị hủy
+// releaseSKU - Release SKU when order is cancelled
 func (s *OrderSyncService) releaseSKU(ctx context.Context, skuID uint) error {
 	return database.DB.Model(&models.SKU{}).
 		Where("id = ?", skuID).
@@ -275,7 +275,7 @@ func (s *OrderSyncService) releaseSKU(ctx context.Context, skuID uint) error {
 // QUERY METHODS
 // =============================================================================
 
-// GetPendingSyncOrders - Lấy các order chưa được sync
+// GetPendingSyncOrders - Get orders that have not been synced
 func (s *OrderSyncService) GetPendingSyncOrders(ctx context.Context) ([]models.Order, error) {
 	var orders []models.Order
 	err := database.DB.Where("sync_state = ?", models.SyncStateNew).
@@ -286,7 +286,7 @@ func (s *OrderSyncService) GetPendingSyncOrders(ctx context.Context) ([]models.O
 	return orders, err
 }
 
-// GetManualReviewOrders - Lấy các order cần review thủ công
+// GetManualReviewOrders - Get orders that need manual review
 func (s *OrderSyncService) GetManualReviewOrders(ctx context.Context) ([]models.Order, error) {
 	var orders []models.Order
 	err := database.DB.Where("sync_state = ?", models.SyncStateManualReview).
@@ -296,7 +296,7 @@ func (s *OrderSyncService) GetManualReviewOrders(ctx context.Context) ([]models.
 	return orders, err
 }
 
-// ReleaseSKU - Public method để giải phóng SKU
+// ReleaseSKU - Public method to release SKU
 func (s *OrderSyncService) ReleaseSKU(ctx context.Context, skuID uint, orderRef string) error {
 	if err := s.releaseSKU(ctx, skuID); err != nil {
 		return err

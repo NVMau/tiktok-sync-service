@@ -15,7 +15,7 @@ import (
 )
 
 // =============================================================================
-// InventoryHandler - Quản lý API inventory và products
+// InventoryHandler - Manages inventory and products API
 // =============================================================================
 
 type InventoryHandler struct {
@@ -177,13 +177,13 @@ func (h *InventoryHandler) GetSKU(c *fiber.Ctx) error {
 }
 
 // CreateSKU - POST /api/v1/products/:product_id/skus
-// Tạo SKU mới từ external system, chờ push lên TikTok
+// Create new SKU from external system, pending push to TikTok
 func (h *InventoryHandler) CreateSKU(c *fiber.Ctx) error {
 	productIDStr := c.Params("product_id")
 	productID, _ := strconv.ParseUint(productIDStr, 10, 32)
 
 	var req struct {
-		SellerSKU string  `json:"seller_sku"` // Số điện thoại
+		SellerSKU string  `json:"seller_sku"` // Phone number
 		Price     float64 `json:"price"`
 	}
 	if err := c.BodyParser(&req); err != nil {
@@ -212,7 +212,7 @@ func (h *InventoryHandler) CreateSKU(c *fiber.Ctx) error {
 }
 
 // CreateSKUsBatch - POST /api/v1/products/:product_id/skus/batch
-// Tạo nhiều SKU cùng lúc
+// Create multiple SKUs at once
 func (h *InventoryHandler) CreateSKUsBatch(c *fiber.Ctx) error {
 	productIDStr := c.Params("product_id")
 	productID, _ := strconv.ParseUint(productIDStr, 10, 32)
@@ -474,7 +474,7 @@ func (h *InventoryHandler) CreateMapping(c *fiber.Ctx) error {
 // =============================================================================
 
 // PushPendingSKUs - POST /api/v1/shops/:shop_id/products/:product_id/push-skus
-// Đẩy tất cả SKU pending của product lên TikTok
+// Push all pending SKUs of a product to TikTok
 func (h *InventoryHandler) PushPendingSKUs(c *fiber.Ctx) error {
 	shop, err := h.getShopByParam(c.Params("shop_id"))
 	if err != nil {
@@ -505,7 +505,7 @@ func (h *InventoryHandler) PushPendingSKUs(c *fiber.Ctx) error {
 }
 
 // PushSingleSKU - POST /api/v1/shops/:shop_id/skus/:sku_id/push
-// Đẩy 1 SKU cụ thể lên TikTok
+// Push a single specific SKU to TikTok
 func (h *InventoryHandler) PushSingleSKU(c *fiber.Ctx) error {
 	shop, err := h.getShopByParam(c.Params("shop_id"))
 	if err != nil {
