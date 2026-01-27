@@ -31,8 +31,7 @@ const (
 
 type Order struct {
 	ID                uint              `gorm:"primaryKey" json:"id"`
-	ShopID            uint              `gorm:"index;not null" json:"shop_id"`                                           // FK → shops.id
-	TikTokShopID      string            `gorm:"size:100;index;not null" json:"tiktok_shop_id"`                           // Actual TikTok shop ID
+	TikTokShopID      string            `gorm:"column:tik_tok_shop_id;size:100;index;not null" json:"tiktok_shop_id"`       // FK → shops.shop_id (TikTok shop ID)
 	TikTokOrderID     string            `gorm:"column:tik_tok_order_id;size:100;uniqueIndex;not null" json:"tiktok_order_id"`
 	TikTokOrderStatus TikTokOrderStatus `gorm:"column:tik_tok_order_status;size:50;index" json:"tiktok_order_status"`
 	PaymentStatus     string            `gorm:"size:50" json:"payment_status"`                                           // PAID / UNPAID
@@ -61,8 +60,7 @@ func (Order) TableName() string {
 
 type OrderItem struct {
 	ID                uint    `gorm:"primaryKey" json:"id"`
-	OrderID           uint    `gorm:"index;not null" json:"order_id"`                                         // FK → orders.id
-	SKUID             *uint   `gorm:"column:sku_id;index" json:"sku_id"`                                      // FK → skus.id (nullable)
+	TikTokOrderID     string  `gorm:"column:tik_tok_order_id;size:100;index;not null" json:"tiktok_order_id"` // FK → orders.tik_tok_order_id
 	TikTokOrderItemID string  `gorm:"column:tik_tok_order_item_id;size:100;index" json:"tiktok_order_item_id"`
 	TikTokProductID   string  `gorm:"column:tik_tok_product_id;size:100" json:"tiktok_product_id"`
 	TikTokSKUID       string  `gorm:"column:tik_tok_sku_id;size:100;index" json:"tiktok_sku_id"`

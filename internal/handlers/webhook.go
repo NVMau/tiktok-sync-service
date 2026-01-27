@@ -103,7 +103,7 @@ func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 	eventID := generateEventID(payload.ShopID, eventTypeName, payload.Timestamp, body)
 
 	event := models.WebhookEvent{
-		ShopID:         shop.ID,
+		TikTokShopID:   shop.ShopID,
 		EventID:        eventID,
 		EventType:      eventTypeName,
 		ReceivedAt:     time.Now(),

@@ -216,7 +216,7 @@ func TestOrder_Fields(t *testing.T) {
 	localOrderID := "local_123"
 	order := Order{
 		ID:                1,
-		ShopID:            1,
+		TikTokShopID:      "shop_123",
 		TikTokOrderID:     "tiktok_order_123",
 		TikTokOrderStatus: OrderStatusAwaitingShipment,
 		TotalAmount:       100.50,

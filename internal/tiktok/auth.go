@@ -129,10 +129,10 @@ func NewTokenManager(cfg *config.Config) *TokenManager {
 	}
 }
 
-func (tm *TokenManager) GetValidToken(ctx context.Context, shopID uint) (string, error) {
+func (tm *TokenManager) GetValidToken(ctx context.Context, tiktokShopID string) (string, error) {
 	var token models.OAuthToken
-	if err := database.DB.Where("shop_id = ?", shopID).First(&token).Error; err != nil {
-		return "", fmt.Errorf("token not found for shop %d: %w", shopID, err)
+	if err := database.DB.Where("tik_tok_shop_id = ?", tiktokShopID).First(&token).Error; err != nil {
+		return "", fmt.Errorf("token not found for shop %s: %w", tiktokShopID, err)
 	}
 
 	if time.Now().Before(token.ExpiresAt.Add(-5 * time.Minute)) {
@@ -156,11 +156,11 @@ func (tm *TokenManager) GetValidToken(ctx context.Context, shopID uint) (string,
 	return token.AccessToken, nil
 }
 
-func (tm *TokenManager) SaveToken(ctx context.Context, shopID uint, tokenResp *TokenResponse) error {
+func (tm *TokenManager) SaveToken(ctx context.Context, tiktokShopID string, tokenResp *TokenResponse) error {
 	scopesJSON, _ := json.Marshal(tokenResp.Data.GrantedScopes)
 
 	token := models.OAuthToken{
-		ShopID:       shopID,
+		TikTokShopID: tiktokShopID,
 		AccessToken:  tokenResp.Data.AccessToken,
 		RefreshToken: tokenResp.Data.RefreshToken,
 		ExpiresAt:    time.Unix(tokenResp.Data.AccessTokenExpireIn, 0),
@@ -168,7 +168,7 @@ func (tm *TokenManager) SaveToken(ctx context.Context, shopID uint, tokenResp *T
 		UpdatedAt:    time.Now(),
 	}
 
-	result := database.DB.Where("shop_id = ?", shopID).
+	result := database.DB.Where("tik_tok_shop_id = ?", tiktokShopID).
 		Assign(token).
 		FirstOrCreate(&token)
 

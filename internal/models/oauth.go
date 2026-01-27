@@ -6,7 +6,7 @@ import (
 
 type OAuthToken struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
-	ShopID       uint      `gorm:"index;not null" json:"shop_id"`
+	TikTokShopID string    `gorm:"column:tik_tok_shop_id;size:100;uniqueIndex;not null" json:"tiktok_shop_id"` // FK → shops.shop_id (unique per shop)
 	AccessToken  string    `gorm:"size:500;not null" json:"-"`
 	RefreshToken string    `gorm:"size:500;not null" json:"-"`
 	ExpiresAt    time.Time `json:"expires_at"`

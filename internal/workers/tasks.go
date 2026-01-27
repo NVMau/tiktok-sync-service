@@ -95,7 +95,7 @@ func processOrderEvent(ctx context.Context, event *models.WebhookEvent) error {
 		zap.String("order_status", data.OrderStatus))
 
 	var shop models.Shop
-	if err := database.DB.First(&shop, event.ShopID).Error; err != nil {
+	if err := database.DB.Where("shop_id = ?", event.TikTokShopID).First(&shop).Error; err != nil {
 		return fmt.Errorf("shop not found: %w", err)
 	}
 
@@ -105,15 +105,15 @@ func processOrderEvent(ctx context.Context, event *models.WebhookEvent) error {
 	ordersAPI := tiktok.NewOrdersAPI(client, tokenManager)
 
 	// Use shop_cipher from DB, not from webhook payload
-	orderDetail, err := ordersAPI.GetOrderDetail(ctx, shop.ID, shop.ShopCipher, data.OrderID)
+	orderDetail, err := ordersAPI.GetOrderDetail(ctx, shop.ShopID, shop.ShopCipher, data.OrderID)
 	if err != nil {
 		return fmt.Errorf("failed to get order detail: %w", err)
 	}
 
-	return upsertOrder(shop.ID, shop.ShopID, orderDetail, event.Payload)
+	return upsertOrder(shop.ShopID, orderDetail, event.Payload)
 }
 
-func upsertOrder(shopID uint, tiktokShopID string, detail *tiktok.OrderDetailResponse, rawPayload []byte) error {
+func upsertOrder(tiktokShopID string, detail *tiktok.OrderDetailResponse, rawPayload []byte) error {
 	var placedAt, paidAt *time.Time
 	if detail.CreateTime > 0 {
 		t := time.Unix(detail.CreateTime, 0)
@@ -135,7 +135,6 @@ func upsertOrder(shopID uint, tiktokShopID string, detail *tiktok.OrderDetailRes
 	shippingAddr, _ := json.Marshal(detail.RecipientAddress)
 
 	order := models.Order{
-		ShopID:            shopID,
 		TikTokShopID:      tiktokShopID,
 		TikTokOrderID:     detail.ID,
 		TikTokOrderStatus: models.TikTokOrderStatus(detail.Status),
@@ -165,7 +164,7 @@ func upsertOrder(shopID uint, tiktokShopID string, detail *tiktok.OrderDetailRes
 		}
 
 		orderItem := models.OrderItem{
-			OrderID:           order.ID,
+			TikTokOrderID:     detail.ID,
 			TikTokOrderItemID: item.ID,
 			TikTokProductID:   item.ProductID,
 			TikTokSKUID:       item.SkuID,
@@ -174,7 +173,7 @@ func upsertOrder(shopID uint, tiktokShopID string, detail *tiktok.OrderDetailRes
 			Price:             price,
 		}
 
-		database.DB.Where("order_id = ? AND tik_tok_order_item_id = ?", order.ID, item.ID).
+		database.DB.Where("tik_tok_order_id = ? AND tik_tok_order_item_id = ?", detail.ID, item.ID).
 			Assign(orderItem).
 			FirstOrCreate(&orderItem)
 	}
@@ -193,9 +192,9 @@ func processPackageEvent(ctx context.Context, event *models.WebhookEvent) error 
 }
 
 type InventoryPayload struct {
-	ShopID     uint   `json:"shop_id"`
-	ShopCipher string `json:"shop_cipher"`
-	SKUID      uint   `json:"sku_id"` // Changed from LocalSimID to SKUID
+	TikTokShopID string `json:"tiktok_shop_id"`
+	ShopCipher   string `json:"shop_cipher"`
+	SKUID        uint   `json:"sku_id"`
 }
 
 func HandleSyncInventory(ctx context.Context, task *asynq.Task) error {
@@ -204,12 +203,14 @@ func HandleSyncInventory(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	logger.Info("syncing inventory for SKU", zap.Uint("sku_id", payload.SKUID))
+	logger.Info("syncing inventory for SKU",
+		zap.String("tiktok_shop_id", payload.TikTokShopID),
+		zap.Uint("sku_id", payload.SKUID))
 
 	cfg := config.Get()
 	inventoryService := services.NewInventorySyncService(cfg)
 
-	if err := inventoryService.SyncSKUInventoryToTikTok(ctx, payload.ShopID, payload.ShopCipher, payload.SKUID); err != nil {
+	if err := inventoryService.SyncSKUInventoryToTikTok(ctx, payload.TikTokShopID, payload.ShopCipher, payload.SKUID); err != nil {
 		return fmt.Errorf("failed to sync inventory: %w", err)
 	}
 
@@ -217,7 +218,7 @@ func HandleSyncInventory(ctx context.Context, task *asynq.Task) error {
 }
 
 type ShipPayload struct {
-	ShopID         uint   `json:"shop_id"`
+	TikTokShopID   string `json:"tiktok_shop_id"`
 	ShopCipher     string `json:"shop_cipher"`
 	TikTokOrderID  string `json:"tiktok_order_id"`
 	TrackingNumber string `json:"tracking_number"`
@@ -236,7 +237,7 @@ func HandleShipPackage(ctx context.Context, task *asynq.Task) error {
 	fulfillmentService := services.NewFulfillmentSyncService(cfg)
 
 	err := fulfillmentService.ShipOrder(ctx, &services.ShipOrderRequest{
-		ShopID:         payload.ShopID,
+		ShopID:         payload.TikTokShopID,
 		ShopCipher:     payload.ShopCipher,
 		TikTokOrderID:  payload.TikTokOrderID,
 		TrackingNumber: payload.TrackingNumber,
@@ -266,12 +267,12 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 
 	for _, shop := range shops {
 		var token models.OAuthToken
-		if err := database.DB.Where("shop_id = ?", shop.ID).First(&token).Error; err != nil {
+		if err := database.DB.Where("tik_tok_shop_id = ?", shop.ShopID).First(&token).Error; err != nil {
 			logger.Warn("no token for shop, skipping", zap.String("shop_id", shop.ShopID))
 			continue
 		}
 
-		orders, err := ordersAPI.GetRecentOrders(ctx, shop.ID, "", 24*time.Hour)
+		orders, err := ordersAPI.GetRecentOrders(ctx, shop.ShopID, shop.ShopCipher, 24*time.Hour)
 		if err != nil {
 			logger.Error("failed to get recent orders for shop",
 				zap.String("shop_id", shop.ShopID),
@@ -299,7 +300,7 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 				continue
 			}
 
-			orderDetail, err := ordersAPI.GetOrderDetail(ctx, shop.ID, "", orderSummary.ID)
+			orderDetail, err := ordersAPI.GetOrderDetail(ctx, shop.ShopID, shop.ShopCipher, orderSummary.ID)
 			if err != nil {
 				logger.Error("failed to get order detail",
 					zap.String("order_id", orderSummary.ID),
@@ -307,7 +308,7 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 				continue
 			}
 
-			if err := upsertOrder(shop.ID, shop.ShopID, orderDetail, nil); err != nil {
+			if err := upsertOrder(shop.ShopID, orderDetail, nil); err != nil {
 				logger.Error("failed to upsert order",
 					zap.String("order_id", orderSummary.ID),
 					zap.Error(err))
@@ -330,9 +331,9 @@ func HandleReconcileOrders(ctx context.Context, task *asynq.Task) error {
 }
 
 type SyncAllInventoryPayload struct {
-	ShopID     uint   `json:"shop_id"`
-	ShopCipher string `json:"shop_cipher"`
-	ProductID  uint   `json:"product_id"` // Sync all SKUs of a product
+	TikTokShopID string `json:"tiktok_shop_id"`
+	ShopCipher   string `json:"shop_cipher"`
+	ProductID    uint   `json:"product_id"`
 }
 
 func HandleSyncAllInventory(ctx context.Context, task *asynq.Task) error {
@@ -341,12 +342,14 @@ func HandleSyncAllInventory(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	logger.Info("syncing all inventory for product", zap.Uint("product_id", payload.ProductID))
+	logger.Info("syncing all inventory for product",
+		zap.String("tiktok_shop_id", payload.TikTokShopID),
+		zap.Uint("product_id", payload.ProductID))
 
 	cfg := config.Get()
 	inventoryService := services.NewInventorySyncService(cfg)
 
-	count, err := inventoryService.SyncProductInventoryToTikTok(ctx, payload.ShopID, payload.ShopCipher, payload.ProductID)
+	count, err := inventoryService.SyncProductInventoryToTikTok(ctx, payload.TikTokShopID, payload.ShopCipher, payload.ProductID)
 	if err != nil {
 		return fmt.Errorf("failed to sync inventory: %w", err)
 	}

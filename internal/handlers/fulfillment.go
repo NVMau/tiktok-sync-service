@@ -75,7 +75,7 @@ func (h *FulfillmentHandler) ShipOrder(c *fiber.Ctx) error {
 	}
 
 	err = h.fulfillmentService.ShipOrder(c.Context(), &services.ShipOrderRequest{
-		ShopID:         shop.ID,
+		ShopID:         shop.ShopID,
 		ShopCipher:     shopCipher,
 		TikTokOrderID:  orderID,
 		TrackingNumber: req.TrackingNumber,
@@ -110,7 +110,7 @@ func (h *FulfillmentHandler) ShipOrderAsync(c *fiber.Ctx) error {
 	}
 
 	taskPayload, _ := json.Marshal(workers.ShipPayload{
-		ShopID:         shop.ID,
+		TikTokShopID:   shop.ShopID,
 		ShopCipher:     shopCipher,
 		TikTokOrderID:  orderID,
 		TrackingNumber: req.TrackingNumber,
@@ -141,7 +141,7 @@ func (h *FulfillmentHandler) GetReadyToShipOrders(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
 	}
 
-	orders, err := h.fulfillmentService.GetOrdersReadyToShip(c.Context(), shop.ID)
+	orders, err := h.fulfillmentService.GetOrdersReadyToShip(c.Context(), shop.ShopID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -160,7 +160,7 @@ func (h *FulfillmentHandler) GetInTransitOrders(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
 	}
 
-	orders, err := h.fulfillmentService.GetOrdersInTransit(c.Context(), shop.ID)
+	orders, err := h.fulfillmentService.GetOrdersInTransit(c.Context(), shop.ShopID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -183,7 +183,7 @@ func (h *FulfillmentHandler) GetShippingProviders(c *fiber.Ctx) error {
 		shopCipher = shop.ShopCipher
 	}
 
-	providers, err := h.fulfillmentService.GetShippingProviders(c.Context(), shop.ID, shopCipher)
+	providers, err := h.fulfillmentService.GetShippingProviders(c.Context(), shop.ShopID, shopCipher)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -206,7 +206,7 @@ func (h *FulfillmentHandler) GetWarehouses(c *fiber.Ctx) error {
 		shopCipher = shop.ShopCipher
 	}
 
-	warehouses, err := h.fulfillmentService.GetWarehouses(c.Context(), shop.ID, shopCipher)
+	warehouses, err := h.fulfillmentService.GetWarehouses(c.Context(), shop.ShopID, shopCipher)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

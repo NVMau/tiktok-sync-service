@@ -35,7 +35,7 @@ func NewFulfillmentSyncService(cfg *config.Config) *FulfillmentSyncService {
 }
 
 type ShipOrderRequest struct {
-	ShopID         uint
+	ShopID         string
 	ShopCipher     string
 	TikTokOrderID  string
 	TrackingNumber string
@@ -44,8 +44,13 @@ type ShipOrderRequest struct {
 }
 
 func (s *FulfillmentSyncService) ShipOrder(ctx context.Context, req *ShipOrderRequest) error {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", req.ShopID).First(&shop).Error; err != nil {
+		return fmt.Errorf("shop not found: %w", err)
+	}
+
 	var order models.Order
-	err := database.DB.Where("shop_id = ? AND tik_tok_order_id = ?", req.ShopID, req.TikTokOrderID).
+	err := database.DB.Where("tik_tok_shop_id = ? AND tik_tok_order_id = ?", req.ShopID, req.TikTokOrderID).
 		First(&order).Error
 	if err != nil {
 		return fmt.Errorf("order not found: %w", err)
@@ -80,8 +85,13 @@ func (s *FulfillmentSyncService) ShipOrder(ctx context.Context, req *ShipOrderRe
 	return nil
 }
 
-func (s *FulfillmentSyncService) MarkDelivered(ctx context.Context, shopID uint, shopCipher, packageID string) error {
-	err := s.fulfillmentAPI.MarkPackageDelivered(ctx, shopID, shopCipher, &tiktok.MarkPackageDeliveredRequest{
+func (s *FulfillmentSyncService) MarkDelivered(ctx context.Context, tiktokShopID string, shopCipher, packageID string) error {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", tiktokShopID).First(&shop).Error; err != nil {
+		return fmt.Errorf("shop not found: %w", err)
+	}
+
+	err := s.fulfillmentAPI.MarkPackageDelivered(ctx, tiktokShopID, shopCipher, &tiktok.MarkPackageDeliveredRequest{
 		PackageID: packageID,
 	})
 
@@ -93,28 +103,36 @@ func (s *FulfillmentSyncService) MarkDelivered(ctx context.Context, shopID uint,
 	return nil
 }
 
-func (s *FulfillmentSyncService) GetShippingProviders(ctx context.Context, shopID uint, shopCipher string) ([]tiktok.ShippingProvider, error) {
-	return s.logisticsAPI.GetShippingProviders(ctx, shopID, shopCipher)
+func (s *FulfillmentSyncService) GetShippingProviders(ctx context.Context, tiktokShopID string, shopCipher string) ([]tiktok.ShippingProvider, error) {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", tiktokShopID).First(&shop).Error; err != nil {
+		return nil, fmt.Errorf("shop not found: %w", err)
+	}
+	return s.logisticsAPI.GetShippingProviders(ctx, tiktokShopID, shopCipher)
 }
 
-func (s *FulfillmentSyncService) GetWarehouses(ctx context.Context, shopID uint, shopCipher string) ([]tiktok.Warehouse, error) {
-	return s.logisticsAPI.GetWarehouses(ctx, shopID, shopCipher)
+func (s *FulfillmentSyncService) GetWarehouses(ctx context.Context, tiktokShopID string, shopCipher string) ([]tiktok.Warehouse, error) {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", tiktokShopID).First(&shop).Error; err != nil {
+		return nil, fmt.Errorf("shop not found: %w", err)
+	}
+	return s.logisticsAPI.GetWarehouses(ctx, tiktokShopID, shopCipher)
 }
 
-func (s *FulfillmentSyncService) GetOrdersReadyToShip(ctx context.Context, shopID uint) ([]models.Order, error) {
+func (s *FulfillmentSyncService) GetOrdersReadyToShip(ctx context.Context, tiktokShopID string) ([]models.Order, error) {
 	var orders []models.Order
-	err := database.DB.Where("shop_id = ? AND tik_tok_order_status = ?",
-		shopID, models.OrderStatusAwaitingShipment).
+	err := database.DB.Where("tik_tok_shop_id = ? AND tik_tok_order_status = ?",
+		tiktokShopID, models.OrderStatusAwaitingShipment).
 		Order("created_at ASC").
 		Find(&orders).Error
 
 	return orders, err
 }
 
-func (s *FulfillmentSyncService) GetOrdersInTransit(ctx context.Context, shopID uint) ([]models.Order, error) {
+func (s *FulfillmentSyncService) GetOrdersInTransit(ctx context.Context, tiktokShopID string) ([]models.Order, error) {
 	var orders []models.Order
-	err := database.DB.Where("shop_id = ? AND tik_tok_order_status IN ?",
-		shopID, []string{
+	err := database.DB.Where("tik_tok_shop_id = ? AND tik_tok_order_status IN ?",
+		tiktokShopID, []string{
 			string(models.OrderStatusAwaitingCollection),
 			string(models.OrderStatusInTransit),
 		}).

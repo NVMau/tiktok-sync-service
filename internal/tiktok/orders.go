@@ -21,7 +21,7 @@ func NewOrdersAPI(client *Client, tokenManager *TokenManager) *OrdersAPI {
 }
 
 type OrderListRequest struct {
-	ShopID       uint
+	TikTokShopID string
 	ShopCipher   string
 	PageSize     int
 	PageToken    string
@@ -50,7 +50,7 @@ type OrderSummary struct {
 }
 
 func (o *OrdersAPI) GetOrderList(ctx context.Context, req *OrderListRequest) (*OrderListResponse, error) {
-	accessToken, err := o.tokenManager.GetValidToken(ctx, req.ShopID)
+	accessToken, err := o.tokenManager.GetValidToken(ctx, req.TikTokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +193,8 @@ type OrderDetailAPIResponse struct {
 	Orders []OrderDetailResponse `json:"orders"`
 }
 
-func (o *OrdersAPI) GetOrderDetail(ctx context.Context, shopID uint, shopCipher, orderID string) (*OrderDetailResponse, error) {
-	accessToken, err := o.tokenManager.GetValidToken(ctx, shopID)
+func (o *OrdersAPI) GetOrderDetail(ctx context.Context, tiktokShopID string, shopCipher, orderID string) (*OrderDetailResponse, error) {
+	accessToken, err := o.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (o *OrdersAPI) GetOrderDetail(ctx context.Context, shopID uint, shopCipher,
 	return &result.Orders[0], nil
 }
 
-func (o *OrdersAPI) GetRecentOrders(ctx context.Context, shopID uint, shopCipher string, since time.Duration) ([]OrderSummary, error) {
+func (o *OrdersAPI) GetRecentOrders(ctx context.Context, tiktokShopID string, shopCipher string, since time.Duration) ([]OrderSummary, error) {
 	now := time.Now()
 	createTimeGe := now.Add(-since).Unix()
 
@@ -233,7 +233,7 @@ func (o *OrdersAPI) GetRecentOrders(ctx context.Context, shopID uint, shopCipher
 
 	for {
 		resp, err := o.GetOrderList(ctx, &OrderListRequest{
-			ShopID:       shopID,
+			TikTokShopID: tiktokShopID,
 			ShopCipher:   shopCipher,
 			PageSize:     50,
 			PageToken:    pageToken,

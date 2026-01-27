@@ -46,7 +46,12 @@ func NewInventorySyncService(cfg *config.Config) *InventorySyncService {
 // =============================================================================
 
 // SyncSKUInventoryToTikTok - Sync inventory of a single SKU to TikTok
-func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, shopID uint, shopCipher string, skuID uint) error {
+func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, tiktokShopID string, shopCipher string, skuID uint) error {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", tiktokShopID).First(&shop).Error; err != nil {
+		return fmt.Errorf("shop not found: %w", err)
+	}
+
 	var sku models.SKU
 	if err := database.DB.First(&sku, skuID).Error; err != nil {
 		return fmt.Errorf("SKU not found: %w", err)
@@ -56,14 +61,14 @@ func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, sho
 		return fmt.Errorf("SKU %s not pushed to TikTok yet", sku.SellerSKU)
 	}
 
-	// Load product separately (gorm:"-" prevents Preload)
+	// Load product by TikTokProductID (gorm:"-" prevents Preload)
 	var product models.Product
-	if err := database.DB.First(&product, sku.ProductID).Error; err != nil {
+	if err := database.DB.Where("tik_tok_product_id = ?", sku.TikTokProductID).First(&product).Error; err != nil {
 		return fmt.Errorf("product not found for SKU %s: %w", sku.SellerSKU, err)
 	}
 
 	// Call TikTok API to update inventory
-	err := s.productsAPI.UpdateInventory(ctx, shopID, shopCipher, &tiktok.UpdateInventoryRequest{
+	err := s.productsAPI.UpdateInventory(ctx, tiktokShopID, shopCipher, &tiktok.UpdateInventoryRequest{
 		ProductID: product.TikTokProductID,
 		SKUs: []tiktok.UpdateSKUInventory{
 			{
@@ -94,7 +99,12 @@ func (s *InventorySyncService) SyncSKUInventoryToTikTok(ctx context.Context, sho
 }
 
 // SyncProductInventoryToTikTok - Sync inventory of all SKUs for a product
-func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context, shopID uint, shopCipher string, productID uint) (int, error) {
+func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context, tiktokShopID string, shopCipher string, productID uint) (int, error) {
+	var shop models.Shop
+	if err := database.DB.Where("shop_id = ?", tiktokShopID).First(&shop).Error; err != nil {
+		return 0, fmt.Errorf("shop not found: %w", err)
+	}
+
 	var product models.Product
 	if err := database.DB.First(&product, productID).Error; err != nil {
 		return 0, fmt.Errorf("product not found: %w", err)
@@ -102,7 +112,7 @@ func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context,
 
 	// Load SKUs separately (gorm:"-" prevents Preload)
 	var skus []models.SKU
-	if err := database.DB.Where("product_id = ?", productID).Find(&skus).Error; err != nil {
+	if err := database.DB.Where("tik_tok_product_id = ?", product.TikTokProductID).Find(&skus).Error; err != nil {
 		return 0, fmt.Errorf("failed to load SKUs: %w", err)
 	}
 
@@ -128,7 +138,7 @@ func (s *InventorySyncService) SyncProductInventoryToTikTok(ctx context.Context,
 		return 0, nil
 	}
 
-	err := s.productsAPI.UpdateInventory(ctx, shopID, shopCipher, &tiktok.UpdateInventoryRequest{
+	err := s.productsAPI.UpdateInventory(ctx, tiktokShopID, shopCipher, &tiktok.UpdateInventoryRequest{
 		ProductID: product.TikTokProductID,
 		SKUs:      skuUpdates,
 	})
@@ -213,47 +223,47 @@ type InventoryStats struct {
 }
 
 // GetInventoryStats - Get inventory statistics for a shop
-func (s *InventorySyncService) GetInventoryStats(ctx context.Context, shopID uint) (*InventoryStats, error) {
+func (s *InventorySyncService) GetInventoryStats(ctx context.Context, tiktokShopID string) (*InventoryStats, error) {
 	stats := &InventoryStats{}
 
 	// Total SKUs
 	database.DB.Model(&models.SKU{}).
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Count(&stats.TotalSKUs)
 
 	// Available
 	database.DB.Model(&models.SKU{}).
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Where("skus.sale_status = ?", models.SKUSaleStatusAvailable).
 		Count(&stats.AvailableSKUs)
 
 	// Reserved
 	database.DB.Model(&models.SKU{}).
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Where("skus.sale_status = ?", models.SKUSaleStatusReserved).
 		Count(&stats.ReservedSKUs)
 
 	// Sold
 	database.DB.Model(&models.SKU{}).
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Where("skus.sale_status = ?", models.SKUSaleStatusSold).
 		Count(&stats.SoldSKUs)
 
 	// Pending push
 	database.DB.Model(&models.SKU{}).
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Where("skus.sync_status = ?", models.SKUSyncStatusPending).
 		Count(&stats.PendingPush)
 
 	// Failed push
 	database.DB.Model(&models.SKU{}).
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Where("skus.sync_status = ?", models.SKUSyncStatusFailed).
 		Count(&stats.FailedPush)
 
@@ -261,12 +271,12 @@ func (s *InventorySyncService) GetInventoryStats(ctx context.Context, shopID uin
 }
 
 // GetSKUsByStatus - Get list of SKUs by status
-func (s *InventorySyncService) GetSKUsByStatus(ctx context.Context, shopID uint, saleStatus models.SKUSaleStatus, limit int) ([]models.SKU, error) {
+func (s *InventorySyncService) GetSKUsByStatus(ctx context.Context, tiktokShopID string, saleStatus models.SKUSaleStatus, limit int) ([]models.SKU, error) {
 	var skus []models.SKU
 
 	query := database.DB.
-		Joins("JOIN tiktok_sync.products ON products.id = skus.product_id").
-		Where("products.shop_id = ?", shopID).
+		Joins("JOIN tiktok_sync.products ON products.tik_tok_product_id = skus.tik_tok_product_id").
+		Where("products.tik_tok_shop_id = ?", tiktokShopID).
 		Where("skus.sale_status = ?", saleStatus).
 		Order("skus.updated_at DESC")
 

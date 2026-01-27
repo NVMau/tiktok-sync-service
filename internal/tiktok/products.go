@@ -24,8 +24,8 @@ func NewProductsAPI(client *Client, tokenManager *TokenManager) *ProductsAPI {
 }
 
 type ProductListRequest struct {
-	ShopID     uint
-	ShopCipher string
+	TikTokShopID string
+	ShopCipher   string
 	PageSize   int
 	PageToken  string
 	Status     string
@@ -46,7 +46,7 @@ type ProductSummary struct {
 }
 
 func (p *ProductsAPI) GetProductList(ctx context.Context, req *ProductListRequest) (*ProductListResponse, error) {
-	accessToken, err := p.tokenManager.GetValidToken(ctx, req.ShopID)
+	accessToken, err := p.tokenManager.GetValidToken(ctx, req.TikTokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,8 @@ type ProductInventory struct {
 	Quantity    int    `json:"quantity"`
 }
 
-func (p *ProductsAPI) GetProductDetail(ctx context.Context, shopID uint, shopCipher, productID string) (*ProductDetail, error) {
-	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+func (p *ProductsAPI) GetProductDetail(ctx context.Context, tiktokShopID string, shopCipher, productID string) (*ProductDetail, error) {
+	accessToken, err := p.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +183,8 @@ type InventoryUpdate struct {
 	Quantity    int    `json:"quantity"`
 }
 
-func (p *ProductsAPI) UpdateInventory(ctx context.Context, shopID uint, shopCipher string, req *UpdateInventoryRequest) error {
-	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+func (p *ProductsAPI) UpdateInventory(ctx context.Context, tiktokShopID string, shopCipher string, req *UpdateInventoryRequest) error {
+	accessToken, err := p.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return err
 	}
@@ -209,8 +209,8 @@ type UpdateSKUPrice struct {
 	SalePrice   string `json:"sale_price,omitempty"`
 }
 
-func (p *ProductsAPI) UpdatePrice(ctx context.Context, shopID uint, shopCipher string, req *UpdatePriceRequest) error {
-	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+func (p *ProductsAPI) UpdatePrice(ctx context.Context, tiktokShopID string, shopCipher string, req *UpdatePriceRequest) error {
+	accessToken, err := p.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return err
 	}
@@ -228,8 +228,8 @@ type ActivateProductRequest struct {
 	ProductIDs []string `json:"product_ids"`
 }
 
-func (p *ProductsAPI) ActivateProducts(ctx context.Context, shopID uint, shopCipher string, productIDs []string) error {
-	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+func (p *ProductsAPI) ActivateProducts(ctx context.Context, tiktokShopID string, shopCipher string, productIDs []string) error {
+	accessToken, err := p.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return err
 	}
@@ -247,8 +247,8 @@ type DeactivateProductRequest struct {
 	ProductIDs []string `json:"product_ids"`
 }
 
-func (p *ProductsAPI) DeactivateProducts(ctx context.Context, shopID uint, shopCipher string, productIDs []string) error {
-	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+func (p *ProductsAPI) DeactivateProducts(ctx context.Context, tiktokShopID string, shopCipher string, productIDs []string) error {
+	accessToken, err := p.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return err
 	}
@@ -308,10 +308,10 @@ type PartialEditSKURes struct {
 
 // PartialEditProduct updates SKUs of a product using Partial Edit API
 // NOTE: Must include ALL existing SKUs + new SKUs, otherwise missing SKUs will be DELETED
-func (p *ProductsAPI) PartialEditProduct(ctx context.Context, shopID uint, shopCipher, productID string, req *PartialEditProductRequest) (*PartialEditProductResponse, error) {
+func (p *ProductsAPI) PartialEditProduct(ctx context.Context, tiktokShopID string, shopCipher, productID string, req *PartialEditProductRequest) (*PartialEditProductResponse, error) {
 	log := logger.Log.Named("tiktok_api")
 
-	accessToken, err := p.tokenManager.GetValidToken(ctx, shopID)
+	accessToken, err := p.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}

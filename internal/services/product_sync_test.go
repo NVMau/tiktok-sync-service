@@ -68,12 +68,12 @@ func createMockPendingSKUs(count int) []models.SKU {
 	skus := make([]models.SKU, count)
 	for i := 0; i < count; i++ {
 		skus[i] = models.SKU{
-			ProductID:  1,
-			SellerSKU:  "0912345" + string(rune('0'+i)) + "00",
-			Price:      150000 + float64(i*10000),
-			Quantity:   1,
-			SyncStatus: models.SKUSyncStatusPending,
-			SaleStatus: models.SKUSaleStatusAvailable,
+			TikTokProductID: "product_123",
+			SellerSKU:       "0912345" + string(rune('0'+i)) + "00",
+			Price:           150000 + float64(i*10000),
+			Quantity:        1,
+			SyncStatus:      models.SKUSyncStatusPending,
+			SaleStatus:      models.SKUSaleStatusAvailable,
 		}
 		skus[i].ID = uint(i + 1)
 	}

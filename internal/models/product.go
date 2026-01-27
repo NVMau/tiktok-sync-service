@@ -36,9 +36,8 @@ const (
 
 type Product struct {
 	ID              uint           `gorm:"primaryKey" json:"id"`
-	ShopID          uint           `gorm:"index;not null" json:"shop_id"`                          // FK → shops.id
-	TikTokShopID    string         `gorm:"size:100;index;not null" json:"tiktok_shop_id"`          // Actual TikTok shop ID (for sync)
-	TikTokProductID string         `gorm:"size:100;uniqueIndex;not null" json:"tiktok_product_id"` // ID from TikTok
+	TikTokShopID    string         `gorm:"column:tik_tok_shop_id;size:100;index;not null" json:"tiktok_shop_id"`          // FK → shops.shop_id (TikTok shop ID)
+	TikTokProductID string         `gorm:"column:tik_tok_product_id;size:100;uniqueIndex;not null" json:"tiktok_product_id"` // ID from TikTok
 	Title           string         `gorm:"size:500;not null" json:"title"`                         // "Lucky Number SIM", "Fortune SIM"
 	Description     string         `gorm:"type:text" json:"description"`                           // Product description
 	CategoryID      string         `gorm:"size:100" json:"category_id"`                            // Category on TikTok
@@ -129,9 +128,9 @@ const (
 )
 
 type SKU struct {
-	ID            uint           `gorm:"primaryKey" json:"id"`
-	ProductID     uint           `gorm:"index;not null" json:"product_id"`                              // FK → products.id
-	TikTokSKUID   *string        `gorm:"column:tik_tok_sku_id;size:100;uniqueIndex" json:"tiktok_sku_id"` // ID from TikTok (UNIQUE)
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	TikTokProductID string         `gorm:"column:tik_tok_product_id;size:100;index;not null" json:"tiktok_product_id"` // FK → products.tik_tok_product_id
+	TikTokSKUID     *string        `gorm:"column:tik_tok_sku_id;size:100;uniqueIndex" json:"tiktok_sku_id"`            // ID from TikTok (UNIQUE)
 	SellerSKU     string         `gorm:"size:100;index;not null" json:"seller_sku"`                     // Phone number (not unique as it can repeat across products)
 	Price         float64        `gorm:"type:decimal(15,2);not null" json:"price"`           // Sale price (VND)
 	OriginalPrice *float64       `gorm:"type:decimal(15,2)" json:"original_price,omitempty"` // Original price (if discounted)

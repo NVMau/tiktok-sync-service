@@ -88,7 +88,7 @@ func (h *AdminHandler) HandleAuthCallback(c *fiber.Ctx) error {
 			continue
 		}
 
-		if err := h.tokenManager.SaveToken(c.Context(), shopModel.ID, tokenResp); err != nil {
+		if err := h.tokenManager.SaveToken(c.Context(), shopModel.ShopID, tokenResp); err != nil {
 			continue
 		}
 
@@ -143,7 +143,7 @@ func (h *AdminHandler) GetShopDetail(c *fiber.Ctx) error {
 	}
 
 	var token models.OAuthToken
-	database.DB.Where("shop_id = ?", shop.ID).First(&token)
+	database.DB.Where("tik_tok_shop_id = ?", shop.ShopID).First(&token)
 
 	return c.JSON(fiber.Map{
 		"shop": shop,
@@ -165,7 +165,7 @@ func (h *AdminHandler) RefreshShopToken(c *fiber.Ctx) error {
 		})
 	}
 
-	accessToken, err := h.tokenManager.GetValidToken(c.Context(), shop.ID)
+	accessToken, err := h.tokenManager.GetValidToken(c.Context(), shop.ShopID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -200,7 +200,7 @@ func (h *AdminHandler) TestShopConnection(c *fiber.Ctx) error {
 	}
 
 	logisticsAPI := tiktok.NewLogisticsAPI(h.client, h.tokenManager)
-	warehouses, err := logisticsAPI.GetWarehouses(c.Context(), shop.ID, req.ShopCipher)
+	warehouses, err := logisticsAPI.GetWarehouses(c.Context(), shop.ShopID, req.ShopCipher)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "API test failed",
@@ -232,9 +232,9 @@ func (h *AdminHandler) GetProducts(c *fiber.Ctx) error {
 
 	productsAPI := tiktok.NewProductsAPI(h.client, h.tokenManager)
 	products, err := productsAPI.GetProductList(c.Context(), &tiktok.ProductListRequest{
-		ShopID:     shop.ID,
-		ShopCipher: shop.ShopCipher,
-		PageSize:   20,
+		TikTokShopID: shop.ShopID,
+		ShopCipher:   shop.ShopCipher,
+		PageSize:     20,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -270,7 +270,7 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 	since := time.Duration(days) * 24 * time.Hour
 
 	ordersAPI := tiktok.NewOrdersAPI(h.client, h.tokenManager)
-	orders, err := ordersAPI.GetRecentOrders(c.Context(), shop.ID, shop.ShopCipher, since)
+	orders, err := ordersAPI.GetRecentOrders(c.Context(), shop.ShopID, shop.ShopCipher, since)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "failed to fetch orders from TikTok",
@@ -283,7 +283,7 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 	var lastError string
 	for _, order := range orders {
 		// Get order details
-		detail, err := ordersAPI.GetOrderDetail(c.Context(), shop.ID, shop.ShopCipher, order.ID)
+		detail, err := ordersAPI.GetOrderDetail(c.Context(), shop.ShopID, shop.ShopCipher, order.ID)
 		if err != nil {
 			lastError = err.Error()
 			failed++
@@ -312,7 +312,7 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 		}
 
 		orderModel := models.Order{
-			ShopID:            shop.ID,
+			TikTokShopID:      shop.ShopID,
 			TikTokOrderID:     order.ID,
 			TikTokOrderStatus: models.TikTokOrderStatus(detail.Status),
 			PaymentStatus:     detail.PaymentMethodName,
@@ -346,8 +346,7 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 			updated++
 		}
 
-		// Sync order items (use orderModel.ID which is now set correctly)
-		orderID := orderModel.ID
+		// Sync order items
 		for _, item := range detail.LineItems {
 			price := 0.0
 			if item.SalePrice != "" {
@@ -355,7 +354,7 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 			}
 
 			itemModel := models.OrderItem{
-				OrderID:           orderID,
+				TikTokOrderID:     order.ID,
 				TikTokOrderItemID: item.ID,
 				TikTokProductID:   item.ProductID,
 				TikTokSKUID:       item.SkuID,
@@ -399,9 +398,9 @@ func (h *AdminHandler) GetOrders(c *fiber.Ctx) error {
 
 	ordersAPI := tiktok.NewOrdersAPI(h.client, h.tokenManager)
 	orders, err := ordersAPI.GetOrderList(c.Context(), &tiktok.OrderListRequest{
-		ShopID:     shop.ID,
-		ShopCipher: shop.ShopCipher,
-		PageSize:   20,
+		TikTokShopID: shop.ShopID,
+		ShopCipher:   shop.ShopCipher,
+		PageSize:     20,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

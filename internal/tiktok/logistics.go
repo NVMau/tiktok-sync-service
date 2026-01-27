@@ -42,8 +42,8 @@ type GetWarehousesResponse struct {
 	Warehouses []Warehouse `json:"warehouses"`
 }
 
-func (l *LogisticsAPI) GetWarehouses(ctx context.Context, shopID uint, shopCipher string) ([]Warehouse, error) {
-	accessToken, err := l.tokenManager.GetValidToken(ctx, shopID)
+func (l *LogisticsAPI) GetWarehouses(ctx context.Context, tiktokShopID string, shopCipher string) ([]Warehouse, error) {
+	accessToken, err := l.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ type GetShippingProvidersResponse struct {
 	ShippingProviders []ShippingProvider `json:"shipping_providers"`
 }
 
-func (l *LogisticsAPI) GetShippingProviders(ctx context.Context, shopID uint, shopCipher string) ([]ShippingProvider, error) {
-	accessToken, err := l.tokenManager.GetValidToken(ctx, shopID)
+func (l *LogisticsAPI) GetShippingProviders(ctx context.Context, tiktokShopID string, shopCipher string) ([]ShippingProvider, error) {
+	accessToken, err := l.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,8 +110,8 @@ type GetDeliveryOptionsResponse struct {
 	DeliveryOptions []DeliveryOption `json:"delivery_options"`
 }
 
-func (l *LogisticsAPI) GetDeliveryOptions(ctx context.Context, shopID uint, shopCipher string) ([]DeliveryOption, error) {
-	accessToken, err := l.tokenManager.GetValidToken(ctx, shopID)
+func (l *LogisticsAPI) GetDeliveryOptions(ctx context.Context, tiktokShopID string, shopCipher string) ([]DeliveryOption, error) {
+	accessToken, err := l.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}

@@ -41,8 +41,8 @@ type ShipPackageResponse struct {
 	FailedOrderIDs []string `json:"failed_order_ids"`
 }
 
-func (f *FulfillmentAPI) ShipPackage(ctx context.Context, shopID uint, shopCipher string, req *ShipPackageRequest) (*ShipPackageResponse, error) {
-	accessToken, err := f.tokenManager.GetValidToken(ctx, shopID)
+func (f *FulfillmentAPI) ShipPackage(ctx context.Context, tiktokShopID string, shopCipher string, req *ShipPackageRequest) (*ShipPackageResponse, error) {
+	accessToken, err := f.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +83,8 @@ type PackageDetail struct {
 	DeliveryType string `json:"delivery_type"`
 }
 
-func (f *FulfillmentAPI) GetPackageDetail(ctx context.Context, shopID uint, shopCipher, packageID string) (*PackageDetail, error) {
-	accessToken, err := f.tokenManager.GetValidToken(ctx, shopID)
+func (f *FulfillmentAPI) GetPackageDetail(ctx context.Context, tiktokShopID string, shopCipher, packageID string) (*PackageDetail, error) {
+	accessToken, err := f.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +111,8 @@ type MarkPackageDeliveredRequest struct {
 	PackageID string `json:"package_id"`
 }
 
-func (f *FulfillmentAPI) MarkPackageDelivered(ctx context.Context, shopID uint, shopCipher string, req *MarkPackageDeliveredRequest) error {
-	accessToken, err := f.tokenManager.GetValidToken(ctx, shopID)
+func (f *FulfillmentAPI) MarkPackageDelivered(ctx context.Context, tiktokShopID string, shopCipher string, req *MarkPackageDeliveredRequest) error {
+	accessToken, err := f.tokenManager.GetValidToken(ctx, tiktokShopID)
 	if err != nil {
 		return err
 	}

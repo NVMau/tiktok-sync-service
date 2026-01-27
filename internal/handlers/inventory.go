@@ -67,7 +67,7 @@ func (h *InventoryHandler) ListProducts(c *fiber.Ctx) error {
 	}
 	status := c.Query("status", "")
 
-	products, err := h.productService.ListProducts(c.Context(), shop.ID, status)
+	products, err := h.productService.ListProducts(c.Context(), shop.ShopID, status)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -121,7 +121,7 @@ func (h *InventoryHandler) SyncProducts(c *fiber.Ctx) error {
 		})
 	}
 
-	count, err := h.productService.SyncProductsFromTikTok(c.Context(), shop.ID, shopCipher)
+	count, err := h.productService.SyncProductsFromTikTok(c.Context(), shop.ShopID, shopCipher)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -139,14 +139,30 @@ func (h *InventoryHandler) SyncProducts(c *fiber.Ctx) error {
 // =============================================================================
 
 // ListSKUs - GET /api/v1/products/:product_id/skus
+// product_id can be TikTok product ID or internal ID
 func (h *InventoryHandler) ListSKUs(c *fiber.Ctx) error {
 	productIDStr := c.Params("product_id")
-	productID, _ := strconv.ParseUint(productIDStr, 10, 32)
+
+	// Try to find product by internal ID first, then by TikTok ID
+	var product models.Product
+	if productID, err := strconv.ParseUint(productIDStr, 10, 32); err == nil {
+		if err := database.DB.First(&product, uint(productID)).Error; err != nil {
+			// Try by TikTok product ID
+			if err := database.DB.Where("tik_tok_product_id = ?", productIDStr).First(&product).Error; err != nil {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "product not found"})
+			}
+		}
+	} else {
+		// Not a number, try by TikTok product ID
+		if err := database.DB.Where("tik_tok_product_id = ?", productIDStr).First(&product).Error; err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "product not found"})
+		}
+	}
 
 	syncStatus := c.Query("sync_status", "")
 	saleStatus := c.Query("sale_status", "")
 
-	skus, err := h.productService.ListSKUs(c.Context(), uint(productID), syncStatus, saleStatus)
+	skus, err := h.productService.ListSKUs(c.Context(), product.TikTokProductID, syncStatus, saleStatus)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -268,7 +284,7 @@ func (h *InventoryHandler) SyncSKUInventory(c *fiber.Ctx) error {
 		shopCipher = shop.ShopCipher
 	}
 
-	err = h.inventoryService.SyncSKUInventoryToTikTok(c.Context(), shop.ID, shopCipher, uint(skuID))
+	err = h.inventoryService.SyncSKUInventoryToTikTok(c.Context(), shop.ShopID, shopCipher, uint(skuID))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -299,9 +315,9 @@ func (h *InventoryHandler) SyncProductInventory(c *fiber.Ctx) error {
 
 	// Enqueue async task
 	taskPayload, _ := json.Marshal(workers.SyncAllInventoryPayload{
-		ShopID:     shop.ID,
-		ShopCipher: shopCipher,
-		ProductID:  uint(productID),
+		TikTokShopID: shop.ShopID,
+		ShopCipher:   shopCipher,
+		ProductID:    uint(productID),
 	})
 
 	task := asynq.NewTask(workers.TaskSyncInventory, taskPayload)
@@ -329,7 +345,7 @@ func (h *InventoryHandler) GetInventoryStats(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
 	}
 
-	stats, err := h.inventoryService.GetInventoryStats(c.Context(), shop.ID)
+	stats, err := h.inventoryService.GetInventoryStats(c.Context(), shop.ShopID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -346,7 +362,7 @@ func (h *InventoryHandler) GetPendingSKUs(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "shop not found"})
 	}
 
-	skus, err := h.productService.GetPendingSKUs(c.Context(), shop.ID)
+	skus, err := h.productService.GetPendingSKUs(c.Context(), shop.ShopID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -491,7 +507,7 @@ func (h *InventoryHandler) PushPendingSKUs(c *fiber.Ctx) error {
 		shopCipher = shop.ShopCipher
 	}
 
-	pushedCount, err := h.productService.PushPendingSKUsToTikTok(c.Context(), shop.ID, shopCipher, uint(productID))
+	pushedCount, err := h.productService.PushPendingSKUsToTikTok(c.Context(), shop.ShopID, shopCipher, uint(productID))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -522,7 +538,7 @@ func (h *InventoryHandler) PushSingleSKU(c *fiber.Ctx) error {
 		shopCipher = shop.ShopCipher
 	}
 
-	err = h.productService.PushSingleSKUToTikTok(c.Context(), shop.ID, shopCipher, uint(skuID))
+	err = h.productService.PushSingleSKUToTikTok(c.Context(), shop.ShopID, shopCipher, uint(skuID))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

@@ -33,7 +33,7 @@ func (h *OrdersHandler) ListOrders(c *fiber.Ctx) error {
 	query := database.DB.Order("created_at DESC").Limit(limit)
 
 	if shopID != "" {
-		query = query.Where("shop_id = ?", shopID)
+		query = query.Where("tik_tok_shop_id = ?", shopID)
 	}
 	if status != "" {
 		query = query.Where("tik_tok_order_status = ?", status)
@@ -138,7 +138,7 @@ func (h *OrdersHandler) GetOrderStats(c *fiber.Ctx) error {
 
 	baseQuery := database.DB.Model(&models.Order{})
 	if shopIDStr != "" {
-		baseQuery = baseQuery.Where("shop_id = ?", shopIDStr)
+		baseQuery = baseQuery.Where("tik_tok_shop_id = ?", shopIDStr)
 	}
 
 	baseQuery.Count(&stats.Total)

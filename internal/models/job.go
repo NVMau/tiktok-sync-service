@@ -16,7 +16,7 @@ const (
 
 type WebhookEvent struct {
 	ID             uint               `gorm:"primaryKey" json:"id"`
-	ShopID         uint               `gorm:"index;not null" json:"shop_id"`
+	TikTokShopID   string             `gorm:"column:tik_tok_shop_id;size:100;index;not null" json:"tiktok_shop_id"` // FK → shops.shop_id
 	EventID        string             `gorm:"size:255;uniqueIndex;not null" json:"event_id"`
 	EventType      string             `gorm:"size:100;index" json:"event_type"`
 	ReceivedAt     time.Time          `json:"received_at"`
@@ -52,9 +52,9 @@ const (
 )
 
 type SyncJob struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	ShopID     uint           `gorm:"index;not null" json:"shop_id"`
-	JobType    JobType        `gorm:"size:50;index;not null" json:"job_type"`
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	TikTokShopID string         `gorm:"column:tik_tok_shop_id;size:100;index;not null" json:"tiktok_shop_id"` // FK → shops.shop_id
+	JobType      JobType        `gorm:"size:50;index;not null" json:"job_type"`
 	DedupeKey  *string        `gorm:"size:255;uniqueIndex" json:"dedupe_key"`
 	Payload    datatypes.JSON `gorm:"type:jsonb" json:"payload"`
 	Status     JobStatus      `gorm:"size:50;default:queued;index" json:"status"`
