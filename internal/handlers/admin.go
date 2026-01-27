@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 
 	"github.com/user/sync-tiktok-mps/internal/config"
@@ -13,6 +14,7 @@ import (
 	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/tiktok"
+	"github.com/user/sync-tiktok-mps/internal/workers"
 )
 
 type AdminHandler struct {
@@ -21,11 +23,13 @@ type AdminHandler struct {
 	tokenManager *tiktok.TokenManager
 	client       *tiktok.Client
 	shopsAPI     *tiktok.ShopsAPI
+	asynqClient  *asynq.Client
 }
 
 func NewAdminHandler(cfg *config.Config) *AdminHandler {
 	client := tiktok.NewClient(cfg)
 	tokenManager := tiktok.NewTokenManager(cfg)
+	asynqClient := workers.NewAsynqClient(cfg.RedisURL)
 
 	return &AdminHandler{
 		cfg:          cfg,
@@ -33,6 +37,7 @@ func NewAdminHandler(cfg *config.Config) *AdminHandler {
 		tokenManager: tokenManager,
 		client:       client,
 		shopsAPI:     tiktok.NewShopsAPI(client, tokenManager),
+		asynqClient:  asynqClient,
 	}
 }
 
@@ -93,15 +98,48 @@ func (h *AdminHandler) HandleAuthCallback(c *fiber.Ctx) error {
 		}
 
 		savedShops = append(savedShops, shopModel)
+
+		h.enqueueInitialShopSync(shopModel.ShopID, shopModel.ShopCipher)
 	}
 
 	return c.JSON(fiber.Map{
-		"message": "authorization successful",
-		"shops":   savedShops,
-		"seller":  tokenResp.Data.SellerName,
-		"region":  tokenResp.Data.SellerBaseRegion,
-		"scopes":  tokenResp.Data.GrantedScopes,
+		"message":      "authorization successful",
+		"shops":        savedShops,
+		"seller":       tokenResp.Data.SellerName,
+		"region":       tokenResp.Data.SellerBaseRegion,
+		"scopes":       tokenResp.Data.GrantedScopes,
+		"initial_sync": "queued for all shops",
 	})
+}
+
+func (h *AdminHandler) enqueueInitialShopSync(shopID, shopCipher string) {
+	logger.Info("attempting to enqueue initial shop sync",
+		zap.String("shop_id", shopID),
+		zap.String("shop_cipher", shopCipher))
+
+	payload := workers.InitialShopSyncPayload{
+		TikTokShopID: shopID,
+		ShopCipher:   shopCipher,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Error("failed to marshal initial sync payload", zap.Error(err))
+		return
+	}
+
+	task := asynq.NewTask(workers.TaskInitialShopSync, payloadBytes)
+	info, err := h.asynqClient.Enqueue(task, asynq.Queue("default"), asynq.MaxRetry(3))
+	if err != nil {
+		logger.Error("failed to enqueue initial shop sync task",
+			zap.String("shop_id", shopID),
+			zap.Error(err))
+		return
+	}
+
+	logger.Info("enqueued initial sync for newly authorized shop",
+		zap.String("shop_id", shopID),
+		zap.String("task_id", info.ID),
+		zap.String("queue", info.Queue))
 }
 
 func (h *AdminHandler) GetAuthorizationURL(c *fiber.Ctx) error {

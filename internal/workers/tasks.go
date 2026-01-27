@@ -359,3 +359,65 @@ func HandleSyncAllInventory(ctx context.Context, task *asynq.Task) error {
 		zap.Uint("product_id", payload.ProductID))
 	return nil
 }
+
+type InitialShopSyncPayload struct {
+	TikTokShopID string `json:"tiktok_shop_id"`
+	ShopCipher   string `json:"shop_cipher"`
+}
+
+func HandleInitialShopSync(ctx context.Context, task *asynq.Task) error {
+	var payload InitialShopSyncPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return fmt.Errorf("failed to parse payload: %w", err)
+	}
+
+	log := logger.Log.Named("initial_shop_sync").With(
+		zap.String("tiktok_shop_id", payload.TikTokShopID),
+	)
+	log.Info("starting initial sync for newly authorized shop")
+
+	cfg := config.Get()
+
+	productSyncService := services.NewProductSyncService(cfg)
+	productCount, err := productSyncService.SyncProductsFromTikTok(ctx, payload.TikTokShopID, payload.ShopCipher)
+	if err != nil {
+		log.Error("failed to sync products", zap.Error(err))
+	} else {
+		log.Info("synced products", zap.Int("count", productCount))
+	}
+
+	client := tiktok.NewClient(cfg)
+	tokenManager := tiktok.NewTokenManager(cfg)
+	ordersAPI := tiktok.NewOrdersAPI(client, tokenManager)
+	orderSyncService := services.NewOrderSyncService()
+
+	orders, err := ordersAPI.GetRecentOrders(ctx, payload.TikTokShopID, payload.ShopCipher, 30*24*time.Hour)
+	if err != nil {
+		log.Error("failed to fetch orders", zap.Error(err))
+	} else {
+		log.Info("fetched orders for sync", zap.Int("count", len(orders)))
+
+		for _, orderSummary := range orders {
+			orderDetail, err := ordersAPI.GetOrderDetail(ctx, payload.TikTokShopID, payload.ShopCipher, orderSummary.ID)
+			if err != nil {
+				log.Warn("failed to get order detail", zap.String("order_id", orderSummary.ID), zap.Error(err))
+				continue
+			}
+
+			if err := upsertOrder(payload.TikTokShopID, orderDetail, nil); err != nil {
+				log.Warn("failed to upsert order", zap.String("order_id", orderSummary.ID), zap.Error(err))
+				continue
+			}
+
+			var newOrder models.Order
+			database.DB.Where("tik_tok_order_id = ?", orderSummary.ID).First(&newOrder)
+			orderSyncService.SyncOrderToLocal(ctx, &newOrder)
+		}
+	}
+
+	log.Info("initial shop sync completed",
+		zap.Int("products_synced", productCount),
+		zap.Int("orders_fetched", len(orders)))
+
+	return nil
+}
