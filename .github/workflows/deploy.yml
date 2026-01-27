@@ -1,4 +1,4 @@
-name: Build and Deploy to Production
+name: Build and Push to GHCR
 
 on:
   push:
@@ -15,9 +15,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
 
     steps:
       - name: Checkout repository
@@ -48,35 +45,15 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          script: |
-            cd ${{ secrets.DEPLOY_PATH }}
-            
-            # Login to GitHub Container Registry
-            echo ${{ secrets.GH_PAT }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Pull latest images
-            docker compose pull
-            
-            # Start all services (first deploy) or recreate api/worker (updates)
-            docker compose up -d
-            
-            # Clean up only dangling images (không ảnh hưởng services khác)
-            docker image prune -f --filter "dangling=true"
-            
-            # Show running containers
-            docker compose ps
+      - name: Summary
+        run: |
+          echo "## 🚀 Image pushed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deploy manually on server:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "cd /opt/tiktok-sync" >> $GITHUB_STEP_SUMMARY
+          echo "docker compose pull" >> $GITHUB_STEP_SUMMARY
+          echo "docker compose up -d" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

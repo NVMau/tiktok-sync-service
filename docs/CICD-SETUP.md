@@ -3,7 +3,7 @@
 ## Flow Overview
 
 ```
-Push to prod branch → GitHub Actions → Build & Push to GHCR → Deploy to Server
+Push to prod branch → GitHub Actions → Build & Push to GHCR → SSH vào server → Deploy thủ công
 ```
 
 ## 1. GitHub Repository Settings
@@ -11,19 +11,6 @@ Push to prod branch → GitHub Actions → Build & Push to GHCR → Deploy to Se
 ### 1.1 Enable GitHub Container Registry
 
 Go to **Settings → Actions → General** → set "Workflow permissions" to **Read and write permissions**.
-
-### 1.2 Configure Secrets
-
-Go to **Settings → Secrets and variables → Actions** and add:
-
-| Secret | Description | Example |
-|--------|-------------|---------|
-| `SERVER_HOST` | Server IP/domain | `192.168.1.100` |
-| `SERVER_USER` | SSH username | `ubuntu` |
-| `SERVER_SSH_KEY` | Private SSH key | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `SERVER_PORT` | SSH port (optional) | `22` |
-| `DEPLOY_PATH` | Path on server | `/opt/tiktok-sync` |
-| `GH_PAT` | GitHub Personal Access Token (với `read:packages` scope) | `ghp_xxxx...` |
 
 ## 2. Server Setup
 
@@ -88,26 +75,33 @@ docker compose logs -f
 
 ### Deploy to Production
 
+**Bước 1:** Push code lên branch `prod`
 ```bash
-# From local machine
 git checkout prod
-git merge main  # or your feature branch
+git merge main
 git push origin prod
 ```
 
-GitHub Actions will automatically:
-1. Build Docker image
-2. Push to `ghcr.io/nvmau/tiktok:latest`
-3. SSH to server and update containers
+**Bước 2:** Đợi GitHub Actions build xong (xem tab Actions)
 
-### View Deployment Status
+**Bước 3:** SSH vào server và deploy
+```bash
+# VPN vào mạng nội bộ trước
+ssh user@server-ip
 
-Go to **Actions** tab in GitHub to see deployment progress.
+# Deploy
+cd /opt/tiktok-sync
+docker compose pull
+docker compose up -d
+
+# Hoặc dùng script
+./scripts/deploy.sh
+```
 
 ### Rollback
 
 ```bash
-# On server - rollback to specific version
+# Rollback về version cụ thể
 docker compose pull ghcr.io/nvmau/tiktok:COMMIT_SHA
 docker compose up -d
 ```
