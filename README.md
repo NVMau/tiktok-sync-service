@@ -96,7 +96,3 @@ go tool cover -html=coverage.out
 | DELIVERED | DELIVERED |
 | COMPLETED | COMPLETED |
 | CANCELLED | CANCELLED |
-
-## License
-
-MIT

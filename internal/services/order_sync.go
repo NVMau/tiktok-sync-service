@@ -84,15 +84,13 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 	// Lookup SKU for each item and perform actions
 	for _, item := range items {
 		tiktokSKUID := item.TikTokSKUID
-		sellerSKU := item.SellerSKU
 
-		// Try to find SKU by TikTokSKUID or SellerSKU
-		sku, err := s.lookupSKU(ctx, tiktokSKUID, sellerSKU)
+		// Try to find SKU by TikTokSKUID
+		sku, err := s.lookupSKU(ctx, tiktokSKUID)
 		if err != nil {
 			logger.Warn("failed to lookup SKU for order item",
 				zap.String("item_id", item.TikTokOrderItemID),
 				zap.String("tiktok_sku_id", tiktokSKUID),
-				zap.String("seller_sku", sellerSKU),
 				zap.Error(err))
 			order.SyncState = models.SyncStateManualReview
 			order.RawPayload = appendError(order.RawPayload, fmt.Sprintf("item %s: %v", item.TikTokOrderItemID, err))
@@ -160,32 +158,18 @@ func (s *OrderSyncService) SyncOrderToLocal(ctx context.Context, order *models.O
 	return nil
 }
 
-// lookupSKU - Lookup SKU by TikTokSKUID or SellerSKU
-// Priority lookup by tik_tok_sku_id (most accurate), fallback to seller_sku
-func (s *OrderSyncService) lookupSKU(ctx context.Context, tiktokSKUID, sellerSKU string) (*models.SKU, error) {
+// lookupSKU - Lookup SKU by TikTokSKUID
+func (s *OrderSyncService) lookupSKU(ctx context.Context, tiktokSKUID string) (*models.SKU, error) {
+	if tiktokSKUID == "" {
+		return nil, fmt.Errorf("no tik_tok_sku_id to lookup")
+	}
+
 	var sku models.SKU
-
-	// Priority 1: Lookup by tik_tok_sku_id (100% accurate from TikTok)
-	if tiktokSKUID != "" {
-		err := database.DB.Where("tik_tok_sku_id = ?", tiktokSKUID).First(&sku).Error
-		if err == nil {
-			return &sku, nil
-		}
+	err := database.DB.Where("tik_tok_sku_id = ?", tiktokSKUID).First(&sku).Error
+	if err != nil {
+		return nil, fmt.Errorf("no SKU found for tik_tok_sku_id=%s", tiktokSKUID)
 	}
-
-	// Priority 2: Lookup by seller_sku (phone number)
-	if sellerSKU != "" {
-		err := database.DB.Where("seller_sku = ?", sellerSKU).First(&sku).Error
-		if err == nil {
-			return &sku, nil
-		}
-	}
-
-	// Both failed
-	if tiktokSKUID == "" && sellerSKU == "" {
-		return nil, fmt.Errorf("no tik_tok_sku_id or seller_sku to lookup")
-	}
-	return nil, fmt.Errorf("no SKU found for tik_tok_sku_id=%s seller_sku=%s", tiktokSKUID, sellerSKU)
+	return &sku, nil
 }
 
 // shouldReserveSKU - Check if SKU should be reserved

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -43,6 +44,8 @@ func NewProductSyncService(cfg *config.Config) *ProductSyncService {
 // =============================================================================
 
 // SyncProductsFromTikTok fetches and syncs all products from TikTok to local DB
+// Uses status="ALL" to include products with all statuses (ACTIVATE, SELLER_DEACTIVATED, DELETED, etc.)
+// to ensure SKUs from historical orders can be looked up
 func (s *ProductSyncService) SyncProductsFromTikTok(ctx context.Context, tiktokShopID string, shopCipher string) (int, error) {
 	log := s.log.With(zap.String("tiktok_shop_id", tiktokShopID))
 
@@ -52,48 +55,65 @@ func (s *ProductSyncService) SyncProductsFromTikTok(ctx context.Context, tiktokS
 		return 0, fmt.Errorf("shop not found: %w", err)
 	}
 
-	resp, err := s.productsAPI.GetProductList(ctx, &tiktok.ProductListRequest{
-		TikTokShopID: tiktokShopID,
-		ShopCipher:   shopCipher,
-		PageSize:     100,
-	})
-	if err != nil {
-		log.Error("failed to fetch products from TikTok", zap.Error(err))
-		return 0, fmt.Errorf("failed to fetch products: %w", err)
-	}
-
 	syncedCount := 0
-	for _, p := range resp.Products {
-		product := models.Product{
-			TikTokShopID:    shop.ShopID,
-			TikTokProductID: p.ID,
-			Title:           p.Title,
-			Status:          models.ProductStatus(p.Status),
+	pageToken := ""
+
+	for {
+		// Use status="ALL" to get products with all statuses including DELETED
+		resp, err := s.productsAPI.GetProductList(ctx, &tiktok.ProductListRequest{
+			TikTokShopID: tiktokShopID,
+			ShopCipher:   shopCipher,
+			PageSize:     100,
+			PageToken:    pageToken,
+			Status:       "ALL",
+		})
+		if err != nil {
+			log.Error("failed to fetch products from TikTok", zap.Error(err))
+			return syncedCount, fmt.Errorf("failed to fetch products: %w", err)
 		}
 
-		result := database.DB.Where("tik_tok_product_id = ?", p.ID).
-			Assign(product).
-			FirstOrCreate(&product)
+		log.Info("fetched products page",
+			zap.Int("count", len(resp.Products)),
+			zap.Int("total", resp.TotalCount))
 
-		if result.Error != nil {
-			log.Warn("failed to upsert product",
-				zap.String("tiktok_product_id", p.ID),
-				zap.Error(result.Error))
-			continue
+		for _, p := range resp.Products {
+			product := models.Product{
+				TikTokShopID:    shop.ShopID,
+				TikTokProductID: p.ID,
+				Title:           p.Title,
+				Status:          models.ProductStatus(p.Status),
+			}
+
+			result := database.DB.Where("tik_tok_product_id = ?", p.ID).
+				Assign(product).
+				FirstOrCreate(&product)
+
+			if result.Error != nil {
+				log.Warn("failed to upsert product",
+					zap.String("tiktok_product_id", p.ID),
+					zap.Error(result.Error))
+				continue
+			}
+
+			if err := s.SyncSKUsFromTikTok(ctx, tiktokShopID, shopCipher, &product); err != nil {
+				log.Warn("failed to sync SKUs for product",
+					zap.String("tiktok_product_id", p.ID),
+					zap.String("status", p.Status),
+					zap.Error(err))
+			}
+
+			syncedCount++
 		}
 
-		if err := s.SyncSKUsFromTikTok(ctx, tiktokShopID, shopCipher, &product); err != nil {
-			log.Warn("failed to sync SKUs for product",
-				zap.String("tiktok_product_id", p.ID),
-				zap.Error(err))
+		// Check for next page
+		if resp.NextPageToken == "" {
+			break
 		}
-
-		syncedCount++
+		pageToken = resp.NextPageToken
 	}
 
 	log.Info("products synced from TikTok",
-		zap.Int("synced_count", syncedCount),
-		zap.Int("total_products", len(resp.Products)))
+		zap.Int("synced_count", syncedCount))
 
 	return syncedCount, nil
 }
@@ -172,11 +192,20 @@ func (s *ProductSyncService) upsertSKUFromTikTok(tiktokProductID string, tikSKU 
 
 	// Determine seller_sku with fallback priority:
 	// 1. seller_sku from TikTok (if not empty)
-	// 2. sales_attributes[0].value_name (phone number from "SELECT NUMBER" variant)
+	// 2. Concatenate all sales_attributes value_name (e.g., "Size-Color" or "0912345678-Red")
 	// 3. tik_tok_sku_id as last resort
 	sellerSKU := tikSKU.SellerSku
 	if sellerSKU == "" && len(tikSKU.SalesAttributes) > 0 {
-		sellerSKU = tikSKU.SalesAttributes[0].ValueName
+		// Combine all attribute values with "-" separator
+		var attrValues []string
+		for _, attr := range tikSKU.SalesAttributes {
+			if attr.ValueName != "" {
+				attrValues = append(attrValues, attr.ValueName)
+			}
+		}
+		if len(attrValues) > 0 {
+			sellerSKU = strings.Join(attrValues, "-")
+		}
 	}
 	if sellerSKU == "" {
 		sellerSKU = tikSKU.ID

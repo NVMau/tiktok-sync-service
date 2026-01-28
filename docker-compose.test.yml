@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tiktok_sync_postgres_test
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tiktok_sync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test_password_123}
+      POSTGRES_DB: ${POSTGRES_DB:-tiktok_sync_db}
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tiktok_sync} -d ${POSTGRES_DB:-tiktok_sync_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: tiktok_sync_redis_test
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  api:
+    build: .
+    container_name: tiktok_sync_api_test
+    command: /app/api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD:-test_password_123}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
+      - REDIS_URL=redis:6379
+      - PORT=8000
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TIKTOK_APP_KEY=${TIKTOK_APP_KEY:-test}
+      - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET:-test}
+      - TIKTOK_SERVICE_ID=${TIKTOK_SERVICE_ID:-test}
+      - TIKTOK_WEBHOOK_SECRET=${TIKTOK_WEBHOOK_SECRET:-test}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+
+  worker:
+    build: .
+    container_name: tiktok_sync_worker_test
+    command: /app/worker
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD:-test_password_123}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
+      - REDIS_URL=redis:6379
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TIKTOK_APP_KEY=${TIKTOK_APP_KEY:-test}
+      - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET:-test}
+      - TIKTOK_SERVICE_ID=${TIKTOK_SERVICE_ID:-test}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  postgres_test_data:
+  redis_test_data:
+
+networks:
+  internal:
+    driver: bridge

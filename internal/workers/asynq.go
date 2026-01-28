@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	TaskProcessWebhook  = "webhook:process"
-	TaskSyncInventory   = "inventory:sync"
-	TaskShipPackage     = "fulfillment:ship"
-	TaskReconcileOrders = "orders:reconcile"
+	TaskProcessWebhook   = "webhook:process"
+	TaskSyncInventory    = "inventory:sync"
+	TaskShipPackage      = "fulfillment:ship"
+	TaskReconcileOrders  = "orders:reconcile"
+	TaskInitialShopSync  = "shop:initial_sync"
 )
 
 func NewAsynqClient(redisAddr string) *asynq.Client {
@@ -48,6 +49,7 @@ func RegisterHandlers(mux *asynq.ServeMux) {
 	mux.HandleFunc(TaskSyncInventory, HandleSyncInventory)
 	mux.HandleFunc(TaskShipPackage, HandleShipPackage)
 	mux.HandleFunc(TaskReconcileOrders, HandleReconcileOrders)
+	mux.HandleFunc(TaskInitialShopSync, HandleInitialShopSync)
 }
 
 func NewScheduler(redisAddr string) *asynq.Scheduler {

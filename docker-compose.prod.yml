@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tiktok_sync_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tiktok_sync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tiktok_sync_db}
+    # ports:
+    #   - "5432:5432"  # Không expose DB ra ngoài trong production
+    volumes:
+      - tiktok_sync_postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tiktok_sync} -d ${POSTGRES_DB:-tiktok_sync_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - tiktok_sync_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: tiktok_sync_redis
+    # ports:
+    #   - "6379:6379"  # Không expose Redis ra ngoài trong production
+    volumes:
+      - tiktok_sync_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - tiktok_sync_network
+
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY}:latest
+    container_name: tiktok_sync_api
+    command: /app/api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
+      - REDIS_URL=redis:6379
+      - PORT=8000
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_OUTPUT=/app/logs/api.log
+      - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
+      - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET}
+      - TIKTOK_SERVICE_ID=${TIKTOK_SERVICE_ID}
+      - TIKTOK_WEBHOOK_SECRET=${TIKTOK_WEBHOOK_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tiktok_sync_network
+
+  worker:
+    image: ghcr.io/${GITHUB_REPOSITORY}:latest
+    container_name: tiktok_sync_worker
+    command: /app/worker
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
+      - REDIS_URL=redis:6379
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_OUTPUT=/app/logs/worker.log
+      - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
+      - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET}
+      - TIKTOK_SERVICE_ID=${TIKTOK_SERVICE_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tiktok_sync_network
+
+volumes:
+  tiktok_sync_postgres_data:
+  tiktok_sync_redis_data:
+
+networks:
+  tiktok_sync_network:
+    driver: bridge

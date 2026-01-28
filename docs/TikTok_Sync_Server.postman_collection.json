@@ -1,0 +1,351 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		"name": "TikTok Sync Server API",
+		"description": "API collection for TikTok Sync Server",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "shop_id",
+			"value": "7369437808455026474",
+			"type": "string"
+		},
+		{
+			"key": "shop_cipher",
+			"value": "ROW_xxxxxx",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/healthz",
+							"host": ["{{base_url}}"],
+							"path": ["healthz"]
+						},
+						"description": "Kiểm tra trạng thái server"
+					}
+				}
+			]
+		},
+		{
+			"name": "Authorization",
+			"item": [
+				{
+					"name": "Get Auth URL",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/auth/url?state=my-state",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "auth", "url"],
+							"query": [
+								{
+									"key": "state",
+									"value": "my-state",
+									"description": "State parameter để verify callback"
+								}
+							]
+						},
+						"description": "Lấy URL để authorize TikTok Shop"
+					}
+				},
+				{
+					"name": "Auth Callback",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/auth/callback?code=AUTH_CODE_HERE&state=my-state",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "auth", "callback"],
+							"query": [
+								{
+									"key": "code",
+									"value": "AUTH_CODE_HERE",
+									"description": "Authorization code từ TikTok"
+								},
+								{
+									"key": "state",
+									"value": "my-state",
+									"description": "State để verify"
+								}
+							]
+						},
+						"description": "Xử lý OAuth callback từ TikTok"
+					}
+				}
+			]
+		},
+		{
+			"name": "Shop Management",
+			"item": [
+				{
+					"name": "List All Shops",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops"]
+						},
+						"description": "Liệt kê tất cả shops đã kết nối"
+					}
+				},
+				{
+					"name": "Get Shop Detail",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops/{{shop_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops", "{{shop_id}}"]
+						},
+						"description": "Lấy chi tiết một shop"
+					}
+				},
+				{
+					"name": "Refresh Shop Token",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops/{{shop_id}}/refresh-token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops", "{{shop_id}}", "refresh-token"]
+						},
+						"description": "Làm mới access token của shop"
+					}
+				},
+				{
+					"name": "Test Shop Connection",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"shop_cipher\": \"{{shop_cipher}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops/{{shop_id}}/test",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops", "{{shop_id}}", "test"]
+						},
+						"description": "Test kết nối API với TikTok Shop"
+					}
+				},
+				{
+					"name": "Get Shop Products",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops/{{shop_id}}/products",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops", "{{shop_id}}", "products"]
+						},
+						"description": "Lấy danh sách sản phẩm của shop từ TikTok"
+					}
+				},
+				{
+					"name": "Get Shop Orders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops/{{shop_id}}/orders",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops", "{{shop_id}}", "orders"]
+						},
+						"description": "Lấy danh sách đơn hàng của shop từ TikTok"
+					}
+				},
+				{
+					"name": "Sync Shop Orders",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/shops/{{shop_id}}/orders/sync",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "shops", "{{shop_id}}", "orders", "sync"]
+						},
+						"description": "Đồng bộ đơn hàng của shop từ TikTok về database"
+					}
+				}
+			]
+		},
+		{
+			"name": "Orders",
+			"item": [
+				{
+					"name": "List Orders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/orders?limit=50&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "orders"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Số đơn hàng tối đa"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Offset phân trang"
+								},
+								{
+									"key": "status",
+									"value": "",
+									"description": "Filter theo trạng thái",
+									"disabled": true
+								},
+								{
+									"key": "shop_id",
+									"value": "",
+									"description": "Filter theo shop",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Lấy danh sách tất cả đơn hàng trong database"
+					}
+				},
+				{
+					"name": "Get Pending Orders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/orders/pending",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "orders", "pending"]
+						},
+						"description": "Lấy danh sách đơn hàng đang pending"
+					}
+				},
+				{
+					"name": "Get Manual Review Orders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/orders/manual-review",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "orders", "manual-review"]
+						},
+						"description": "Lấy danh sách đơn hàng cần review thủ công"
+					}
+				},
+				{
+					"name": "Get Orders Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/orders/stats",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "orders", "stats"]
+						},
+						"description": "Lấy thống kê đơn hàng"
+					}
+				}
+			]
+		},
+		{
+			"name": "Webhooks",
+			"item": [
+				{
+					"name": "Receive TikTok Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Tiktok-Signature",
+								"value": "t=1704067200,s=signature_here",
+								"description": "Signature để verify"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"ORDER_STATUS_CHANGE\",\n  \"shop_id\": \"{{shop_id}}\",\n  \"timestamp\": 1704067200,\n  \"data\": {\n    \"order_id\": \"1234567890\",\n    \"order_status\": \"AWAITING_SHIPMENT\",\n    \"update_time\": 1704067200,\n    \"shop_cipher\": \"{{shop_cipher}}\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/webhooks/tiktok",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "webhooks", "tiktok"]
+						},
+						"description": "Nhận webhook events từ TikTok Shop"
+					}
+				},
+				{
+					"name": "List Webhook Events",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/webhooks/events?status=all&limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "webhooks", "events"],
+							"query": [
+								{
+									"key": "status",
+									"value": "all",
+									"description": "Filter by status: pending, processed, failed"
+								},
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Số events tối đa"
+								}
+							]
+						},
+						"description": "Liệt kê webhook events"
+					}
+				},
+				{
+					"name": "Retry Webhook Event",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/webhooks/events/1/retry",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "webhooks", "events", "1", "retry"]
+						},
+						"description": "Retry xử lý một webhook event failed"
+					}
+				}
+			]
+		}
+	]
+}
