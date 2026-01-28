@@ -44,6 +44,8 @@ func NewProductSyncService(cfg *config.Config) *ProductSyncService {
 // =============================================================================
 
 // SyncProductsFromTikTok fetches and syncs all products from TikTok to local DB
+// This includes products with all statuses (ACTIVATE, SELLER_DEACTIVATED, DELETED, etc.)
+// to ensure SKUs from historical orders can be looked up
 func (s *ProductSyncService) SyncProductsFromTikTok(ctx context.Context, tiktokShopID string, shopCipher string) (int, error) {
 	log := s.log.With(zap.String("tiktok_shop_id", tiktokShopID))
 
@@ -53,48 +55,83 @@ func (s *ProductSyncService) SyncProductsFromTikTok(ctx context.Context, tiktokS
 		return 0, fmt.Errorf("shop not found: %w", err)
 	}
 
-	resp, err := s.productsAPI.GetProductList(ctx, &tiktok.ProductListRequest{
-		TikTokShopID: tiktokShopID,
-		ShopCipher:   shopCipher,
-		PageSize:     100,
-	})
-	if err != nil {
-		log.Error("failed to fetch products from TikTok", zap.Error(err))
-		return 0, fmt.Errorf("failed to fetch products: %w", err)
+	// Sync products with all statuses to ensure we have SKUs for historical orders
+	// TikTok API statuses: DRAFT, PENDING, FAILED, ACTIVATE, SELLER_DEACTIVATED, 
+	// PLATFORM_DEACTIVATED, FREEZE, DELETED
+	statuses := []string{
+		"",                      // Default (active products)
+		"SELLER_DEACTIVATED",    // Seller disabled products
+		"PLATFORM_DEACTIVATED",  // Platform disabled products
+		"DELETED",               // Deleted products
 	}
 
 	syncedCount := 0
-	for _, p := range resp.Products {
-		product := models.Product{
-			TikTokShopID:    shop.ShopID,
-			TikTokProductID: p.ID,
-			Title:           p.Title,
-			Status:          models.ProductStatus(p.Status),
+	seenProductIDs := make(map[string]bool)
+
+	for _, status := range statuses {
+		log.Info("syncing products with status", zap.String("status", status))
+		
+		pageToken := ""
+		for {
+			resp, err := s.productsAPI.GetProductList(ctx, &tiktok.ProductListRequest{
+				TikTokShopID: tiktokShopID,
+				ShopCipher:   shopCipher,
+				PageSize:     100,
+				PageToken:    pageToken,
+				Status:       status,
+			})
+			if err != nil {
+				log.Warn("failed to fetch products from TikTok",
+					zap.String("status", status),
+					zap.Error(err))
+				break
+			}
+
+			for _, p := range resp.Products {
+				// Skip if already processed (avoid duplicates across status queries)
+				if seenProductIDs[p.ID] {
+					continue
+				}
+				seenProductIDs[p.ID] = true
+
+				product := models.Product{
+					TikTokShopID:    shop.ShopID,
+					TikTokProductID: p.ID,
+					Title:           p.Title,
+					Status:          models.ProductStatus(p.Status),
+				}
+
+				result := database.DB.Where("tik_tok_product_id = ?", p.ID).
+					Assign(product).
+					FirstOrCreate(&product)
+
+				if result.Error != nil {
+					log.Warn("failed to upsert product",
+						zap.String("tiktok_product_id", p.ID),
+						zap.Error(result.Error))
+					continue
+				}
+
+				if err := s.SyncSKUsFromTikTok(ctx, tiktokShopID, shopCipher, &product); err != nil {
+					log.Warn("failed to sync SKUs for product",
+						zap.String("tiktok_product_id", p.ID),
+						zap.Error(err))
+				}
+
+				syncedCount++
+			}
+
+			// Check for next page
+			if resp.NextPageToken == "" {
+				break
+			}
+			pageToken = resp.NextPageToken
 		}
-
-		result := database.DB.Where("tik_tok_product_id = ?", p.ID).
-			Assign(product).
-			FirstOrCreate(&product)
-
-		if result.Error != nil {
-			log.Warn("failed to upsert product",
-				zap.String("tiktok_product_id", p.ID),
-				zap.Error(result.Error))
-			continue
-		}
-
-		if err := s.SyncSKUsFromTikTok(ctx, tiktokShopID, shopCipher, &product); err != nil {
-			log.Warn("failed to sync SKUs for product",
-				zap.String("tiktok_product_id", p.ID),
-				zap.Error(err))
-		}
-
-		syncedCount++
 	}
 
 	log.Info("products synced from TikTok",
 		zap.Int("synced_count", syncedCount),
-		zap.Int("total_products", len(resp.Products)))
+		zap.Int("unique_products", len(seenProductIDs)))
 
 	return syncedCount, nil
 }

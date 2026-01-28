@@ -196,7 +196,7 @@ Lấy danh sách sản phẩm của shop từ TikTok.
 | Param | Type | Description |
 |-------|------|-------------|
 | shop_id | string | TikTok Shop ID |
-
+  
 ---
 
 ### GET /api/v1/admin/shops/:shop_id/orders
