@@ -60,6 +60,10 @@ services:
       - REDIS_URL=redis:6379
       - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
       - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET}
+      - CALLBACK_URL=${CALLBACK_URL:-}
+      - CALLBACK_SECRET=${CALLBACK_SECRET:-}
+      - CALLBACK_TIMEOUT=${CALLBACK_TIMEOUT:-10}
+      - CALLBACK_RETRIES=${CALLBACK_RETRIES:-3}
     depends_on:
       postgres:
         condition: service_healthy

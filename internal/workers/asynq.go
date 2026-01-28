@@ -16,6 +16,7 @@ const (
 	TaskShipPackage      = "fulfillment:ship"
 	TaskReconcileOrders  = "orders:reconcile"
 	TaskInitialShopSync  = "shop:initial_sync"
+	TaskSendCallback     = "callback:send"
 )
 
 func NewAsynqClient(redisAddr string) *asynq.Client {
@@ -50,6 +51,7 @@ func RegisterHandlers(mux *asynq.ServeMux) {
 	mux.HandleFunc(TaskShipPackage, HandleShipPackage)
 	mux.HandleFunc(TaskReconcileOrders, HandleReconcileOrders)
 	mux.HandleFunc(TaskInitialShopSync, HandleInitialShopSync)
+	mux.HandleFunc(TaskSendCallback, HandleSendCallback)
 }
 
 func NewScheduler(redisAddr string) *asynq.Scheduler {

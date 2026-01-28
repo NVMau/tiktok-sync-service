@@ -99,6 +99,11 @@ func processOrderEvent(ctx context.Context, event *models.WebhookEvent) error {
 		return fmt.Errorf("shop not found: %w", err)
 	}
 
+	// Check if order exists and get old status for callback
+	var existingOrder models.Order
+	isNewOrder := database.DB.Where("tik_tok_order_id = ?", data.OrderID).First(&existingOrder).Error != nil
+	oldStatus := string(existingOrder.TikTokOrderStatus)
+
 	cfg := config.Get()
 	client := tiktok.NewClient(cfg)
 	tokenManager := tiktok.NewTokenManager(cfg)
@@ -110,7 +115,25 @@ func processOrderEvent(ctx context.Context, event *models.WebhookEvent) error {
 		return fmt.Errorf("failed to get order detail: %w", err)
 	}
 
-	return upsertOrder(shop.ShopID, orderDetail, event.Payload)
+	if err := upsertOrder(shop.ShopID, orderDetail, event.Payload); err != nil {
+		return err
+	}
+
+	// Enqueue callback task (async, non-blocking)
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{Addr: cfg.RedisURL})
+	defer asynqClient.Close()
+
+	if isNewOrder {
+		if err := EnqueueOrderCreatedCallback(asynqClient, data.OrderID, shop.ShopID); err != nil {
+			logger.Warn("failed to enqueue order created callback", zap.Error(err))
+		}
+	} else if oldStatus != orderDetail.Status {
+		if err := EnqueueOrderStatusChangeCallback(asynqClient, data.OrderID, shop.ShopID, oldStatus, orderDetail.Status); err != nil {
+			logger.Warn("failed to enqueue status change callback", zap.Error(err))
+		}
+	}
+
+	return nil
 }
 
 func upsertOrder(tiktokShopID string, detail *tiktok.OrderDetailResponse, rawPayload []byte) error {

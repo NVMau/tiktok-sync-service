@@ -561,6 +561,124 @@ Nhận webhook events từ TikTok Shop.
 5. Lưu vào `webhook_events` table
 6. Enqueue task vào Asynq (priority queue cho ORDER_STATUS_CHANGE)
 7. Worker xử lý: fetch order detail từ TikTok API → upsert vào DB
+8. **Callback** (nếu có CALLBACK_URL): Enqueue callback task → gửi thông tin đến external service
+
+**Callback Payloads:**
+
+Khi có CALLBACK_URL được cấu hình, hệ thống sẽ gửi POST request đến URL đó với các payload sau:
+
+**ORDER_CREATED - Đơn hàng mới:**
+```json
+{
+  "event_type": "ORDER_CREATED",
+  "tiktok_order_id": "576xxxxxxx",
+  "tiktok_shop_id": "7123456789",
+  "tiktok_order_status": "AWAITING_PAYMENT",
+  "total_amount": 299000,
+  "currency": "VND",
+  "placed_at": "2024-01-28T10:30:00Z",
+  "items": [
+    {
+      "tiktok_order_item_id": "item_001",
+      "tiktok_sku_id": "sku_123",
+      "seller_sku": "0912345678",
+      "qty": 1,
+      "price": 149000
+    },
+    {
+      "tiktok_order_item_id": "item_002",
+      "tiktok_sku_id": "sku_456",
+      "seller_sku": "0987654321",
+      "qty": 1,
+      "price": 150000
+    }
+  ],
+  "timestamp": 1706430600
+}
+```
+
+**ORDER_STATUS_CHANGE - Thay đổi trạng thái:**
+```json
+{
+  "event_type": "ORDER_STATUS_CHANGE",
+  "tiktok_order_id": "576xxxxxxx",
+  "tiktok_shop_id": "7123456789",
+  "old_status": "AWAITING_PAYMENT",
+  "new_status": "AWAITING_SHIPMENT",
+  "timestamp": 1706430900
+}
+```
+
+**Callback Headers:**
+| Header | Description |
+|--------|-------------|
+| Content-Type | application/json |
+| X-Callback-Source | tiktok-sync-server |
+| X-Callback-Timestamp | Unix timestamp |
+| X-Callback-Signature | HMAC-SHA256 signature (nếu có CALLBACK_SECRET) |
+
+**Callback Configuration (ENV):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| CALLBACK_URL | (empty) | URL nhận callback, để trống để disable |
+| CALLBACK_SECRET | (empty) | Secret key cho HMAC signature |
+| CALLBACK_TIMEOUT | 10 | Timeout (seconds) |
+| CALLBACK_RETRIES | 3 | Số lần retry nếu fail |
+
+**Signature Verification (Bảo mật):**
+
+Để verify callback là từ TikTok Sync Server, external service cần:
+
+1. Lấy `X-Callback-Timestamp` và `X-Callback-Signature` từ headers
+2. Validate timestamp không quá cũ (recommend: 5 phút)
+3. Tính signature: `HMAC-SHA256(timestamp + "." + body, CALLBACK_SECRET)`
+4. So sánh với `X-Callback-Signature`
+
+**Ví dụ verify bằng Python:**
+```python
+import hmac
+import hashlib
+import time
+
+def verify_callback(timestamp, body, signature, secret):
+    # Check timestamp (5 minutes tolerance)
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+    
+    # Calculate expected signature
+    message = f"{timestamp}.{body}"
+    expected = hmac.new(
+        secret.encode(),
+        message.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(expected, signature)
+```
+
+**Ví dụ verify bằng Node.js:**
+```javascript
+const crypto = require('crypto');
+
+function verifyCallback(timestamp, body, signature, secret) {
+  // Check timestamp (5 minutes tolerance)
+  if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
+    return false;
+  }
+  
+  // Calculate expected signature
+  const message = `${timestamp}.${body}`;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(message)
+    .digest('hex');
+  
+  return crypto.timingSafeEqual(
+    Buffer.from(expected),
+    Buffer.from(signature)
+  );
+}
+```
 
 ---
 
