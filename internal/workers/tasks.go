@@ -390,7 +390,8 @@ func HandleInitialShopSync(ctx context.Context, task *asynq.Task) error {
 	ordersAPI := tiktok.NewOrdersAPI(client, tokenManager)
 	orderSyncService := services.NewOrderSyncService()
 
-	orders, err := ordersAPI.GetRecentOrders(ctx, payload.TikTokShopID, payload.ShopCipher, 30*24*time.Hour)
+	// Sync all orders from last 365 days (maximum allowed by TikTok API)
+	orders, err := ordersAPI.GetRecentOrders(ctx, payload.TikTokShopID, payload.ShopCipher, 365*24*time.Hour)
 	if err != nil {
 		log.Error("failed to fetch orders", zap.Error(err))
 	} else {
