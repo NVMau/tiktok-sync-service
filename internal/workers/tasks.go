@@ -168,7 +168,6 @@ func upsertOrder(tiktokShopID string, detail *tiktok.OrderDetailResponse, rawPay
 			TikTokOrderItemID: item.ID,
 			TikTokProductID:   item.ProductID,
 			TikTokSKUID:       item.SkuID,
-			SellerSKU:         item.SellerSku,
 			Qty:               item.Quantity,
 			Price:             price,
 		}

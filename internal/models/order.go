@@ -59,14 +59,13 @@ func (Order) TableName() string {
 }
 
 type OrderItem struct {
-	ID                uint    `gorm:"primaryKey" json:"id"`
-	TikTokOrderID     string  `gorm:"column:tik_tok_order_id;size:100;index;not null" json:"tiktok_order_id"` // FK → orders.tik_tok_order_id
-	TikTokOrderItemID string  `gorm:"column:tik_tok_order_item_id;size:100;index" json:"tiktok_order_item_id"`
-	TikTokProductID   string  `gorm:"column:tik_tok_product_id;size:100" json:"tiktok_product_id"`
-	TikTokSKUID       string  `gorm:"column:tik_tok_sku_id;size:100;index" json:"tiktok_sku_id"`
-	SellerSKU         string  `gorm:"size:100;index" json:"seller_sku"`                                       // Phone number
-	Qty               int     `gorm:"not null;default:1" json:"qty"`
-	Price             float64 `gorm:"type:decimal(15,2)" json:"price"`
+	ID                uint      `gorm:"primaryKey" json:"id"`
+	TikTokOrderID     string    `gorm:"column:tik_tok_order_id;size:100;index;not null" json:"tiktok_order_id"` // FK → orders.tik_tok_order_id
+	TikTokOrderItemID string    `gorm:"column:tik_tok_order_item_id;size:100;index" json:"tiktok_order_item_id"`
+	TikTokProductID   string    `gorm:"column:tik_tok_product_id;size:100" json:"tiktok_product_id"`
+	TikTokSKUID       string    `gorm:"column:tik_tok_sku_id;size:100;index" json:"tiktok_sku_id"`
+	Qty               int       `gorm:"not null;default:1" json:"qty"`
+	Price             float64   `gorm:"type:decimal(15,2)" json:"price"`
 	CreatedAt         time.Time `json:"created_at"`
 
 	// Relations (not migrated, used for preload only)

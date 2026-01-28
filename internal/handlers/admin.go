@@ -396,7 +396,6 @@ func (h *AdminHandler) SyncOrders(c *fiber.Ctx) error {
 				TikTokOrderItemID: item.ID,
 				TikTokProductID:   item.ProductID,
 				TikTokSKUID:       item.SkuID,
-				SellerSKU:         item.SellerSku,
 				Qty:               item.Quantity,
 				Price:             price,
 			}

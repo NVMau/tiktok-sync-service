@@ -189,6 +189,328 @@ Test kết nối API với TikTok Shop.
 
 ---
 
+### GET /api/v1/admin/shops/:shop_id/products
+Lấy danh sách sản phẩm của shop từ TikTok.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | TikTok Shop ID |
+
+---
+
+### GET /api/v1/admin/shops/:shop_id/orders
+Lấy danh sách đơn hàng của shop từ TikTok.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | TikTok Shop ID |
+
+---
+
+### POST /api/v1/admin/shops/:shop_id/orders/sync
+Đồng bộ đơn hàng của shop từ TikTok về database.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | TikTok Shop ID |
+
+---
+
+## 📦 Orders APIs
+
+### GET /api/v1/orders
+Lấy danh sách tất cả đơn hàng trong database.
+
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| limit | int | 50 | Số đơn hàng tối đa |
+| offset | int | 0 | Offset phân trang |
+| status | string | - | Filter theo trạng thái |
+| shop_id | string | - | Filter theo shop |
+
+---
+
+### GET /api/v1/orders/pending
+Lấy danh sách đơn hàng đang pending (chưa xử lý).
+
+---
+
+### GET /api/v1/orders/manual-review
+Lấy danh sách đơn hàng cần review thủ công.
+
+---
+
+### GET /api/v1/orders/stats
+Lấy thống kê đơn hàng.
+
+**Response:**
+```json
+{
+  "total": 100,
+  "pending": 10,
+  "awaiting_shipment": 15,
+  "in_transit": 30,
+  "completed": 40,
+  "cancelled": 5
+}
+```
+
+---
+
+### GET /api/v1/orders/:id
+Lấy chi tiết một đơn hàng.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| id | string | Order ID |
+
+---
+
+### POST /api/v1/orders/:id/sync
+Đồng bộ lại một đơn hàng từ TikTok.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| id | string | Order ID |
+
+---
+
+## 📦 Products & SKUs APIs
+
+### GET /api/v1/shops/:shop_id/products
+Lấy danh sách sản phẩm của shop trong database.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | TikTok Shop ID |
+
+---
+
+### POST /api/v1/shops/:shop_id/products/sync
+Đồng bộ sản phẩm từ TikTok về database.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | TikTok Shop ID |
+
+---
+
+### GET /api/v1/products/:id
+Lấy chi tiết một sản phẩm.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| id | string | Product ID |
+
+---
+
+### GET /api/v1/products/:product_id/skus
+Lấy danh sách SKUs của sản phẩm.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| product_id | string | Product ID |
+
+---
+
+### POST /api/v1/products/:product_id/skus
+Tạo một SKU mới cho sản phẩm.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| product_id | string | Product ID |
+
+---
+
+### POST /api/v1/products/:product_id/skus/batch
+Tạo nhiều SKUs cho sản phẩm.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| product_id | string | Product ID |
+
+---
+
+### GET /api/v1/skus/:id
+Lấy chi tiết một SKU.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| id | string | SKU ID |
+
+---
+
+### PUT /api/v1/skus/:id/price
+Cập nhật giá của SKU.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| id | string | SKU ID |
+
+---
+
+## 📊 Inventory APIs
+
+### POST /api/v1/shops/:shop_id/skus/:sku_id/sync
+Đồng bộ inventory của SKU với TikTok.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+| sku_id | string | SKU ID |
+
+---
+
+### POST /api/v1/shops/:shop_id/products/:product_id/sync-inventory
+Đồng bộ inventory của tất cả SKUs trong sản phẩm.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+| product_id | string | Product ID |
+
+---
+
+### GET /api/v1/shops/:shop_id/inventory/stats
+Lấy thống kê inventory của shop.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+
+---
+
+### GET /api/v1/shops/:shop_id/skus/pending
+Lấy danh sách SKUs pending (chưa đồng bộ).
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+
+---
+
+### POST /api/v1/shops/:shop_id/products/:product_id/push-skus
+Push các SKUs pending lên TikTok.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+| product_id | string | Product ID |
+
+---
+
+### POST /api/v1/shops/:shop_id/skus/:sku_id/push
+Push một SKU lên TikTok.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+| sku_id | string | SKU ID |
+
+---
+
+### GET /api/v1/inventory
+Legacy: Lấy danh sách inventory.
+
+---
+
+### GET /api/v1/inventory/:id
+Legacy: Lấy chi tiết inventory.
+
+---
+
+## 🚚 Fulfillment APIs
+
+### GET /api/v1/shops/:shop_id/orders/ready-to-ship
+Lấy danh sách đơn hàng sẵn sàng ship.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+
+---
+
+### GET /api/v1/shops/:shop_id/orders/in-transit
+Lấy danh sách đơn hàng đang vận chuyển.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+
+---
+
+### POST /api/v1/shops/:shop_id/orders/:order_id/ship
+Ship đơn hàng (đồng bộ).
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+| order_id | string | Order ID |
+
+**Request Body:**
+```json
+{
+  "tracking_number": "VN123456789",
+  "shipping_provider_id": "provider_001"
+}
+```
+
+---
+
+### POST /api/v1/shops/:shop_id/orders/:order_id/ship-async
+Ship đơn hàng (bất đồng bộ - qua queue).
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+| order_id | string | Order ID |
+
+---
+
+### GET /api/v1/shops/:shop_id/shipping-providers
+Lấy danh sách nhà vận chuyển.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+
+---
+
+### GET /api/v1/shops/:shop_id/warehouses
+Lấy danh sách kho hàng.
+
+**Path Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| shop_id | string | Shop ID |
+
+---
+
 ## 📨 Webhook APIs
 
 ### POST /api/v1/webhooks/tiktok

@@ -42,12 +42,16 @@ services:
     command: /app/api
     ports:
       - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./logs:/app/logs
     environment:
+      - TZ=Asia/Ho_Chi_Minh
       - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
       - REDIS_URL=redis:6379
       - PORT=8000
       - ENVIRONMENT=production
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_OUTPUT=/app/logs/api.log
       - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
       - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET}
       - TIKTOK_SERVICE_ID=${TIKTOK_SERVICE_ID}
@@ -65,11 +69,15 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY}:latest
     container_name: tiktok_sync_worker
     command: /app/worker
+    volumes:
+      - ./logs:/app/logs
     environment:
+      - TZ=Asia/Ho_Chi_Minh
       - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
       - REDIS_URL=redis:6379
       - ENVIRONMENT=production
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_OUTPUT=/app/logs/worker.log
       - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
       - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET}
       - TIKTOK_SERVICE_ID=${TIKTOK_SERVICE_ID}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -172,11 +173,20 @@ func (s *ProductSyncService) upsertSKUFromTikTok(tiktokProductID string, tikSKU 
 
 	// Determine seller_sku with fallback priority:
 	// 1. seller_sku from TikTok (if not empty)
-	// 2. sales_attributes[0].value_name (phone number from "SELECT NUMBER" variant)
+	// 2. Concatenate all sales_attributes value_name (e.g., "Size-Color" or "0912345678-Red")
 	// 3. tik_tok_sku_id as last resort
 	sellerSKU := tikSKU.SellerSku
 	if sellerSKU == "" && len(tikSKU.SalesAttributes) > 0 {
-		sellerSKU = tikSKU.SalesAttributes[0].ValueName
+		// Combine all attribute values with "-" separator
+		var attrValues []string
+		for _, attr := range tikSKU.SalesAttributes {
+			if attr.ValueName != "" {
+				attrValues = append(attrValues, attr.ValueName)
+			}
+		}
+		if len(attrValues) > 0 {
+			sellerSKU = strings.Join(attrValues, "-")
+		}
 	}
 	if sellerSKU == "" {
 		sellerSKU = tikSKU.ID
