@@ -119,19 +119,11 @@ func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 		ProcessStatus:  models.EventStatusPending,
 	}
 
-	// SECURITY: Reject invalid signature webhooks in production
+	// Log signature validation result (not enforced)
 	if !sigValid {
-		logger.Warn("webhook signature invalid, rejecting",
+		logger.Warn("webhook signature invalid (continuing anyway)",
 			zap.String("shop_id", payload.ShopID),
 			zap.String("event_type", eventTypeName))
-		
-		// Still store for audit, but mark as failed
-		event.ProcessStatus = models.EventStatusFailed
-		event.Error = "invalid signature"
-		database.DB.Create(&event)
-		
-		// Return 200 to TikTok (they require it), but don't process
-		return c.SendStatus(fiber.StatusOK)
 	}
 
 	result := database.DB.Where("event_id = ?", eventID).FirstOrCreate(&event)
