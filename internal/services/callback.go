@@ -154,10 +154,8 @@ func (s *CallbackService) sendCallback(ctx context.Context, payload interface{})
 		return fmt.Errorf("failed to marshal callback payload: %w", err)
 	}
 
-	// Log payload for debugging before sending
-	logger.Info("preparing callback request",
+	logger.Debug("preparing callback request",
 		zap.String("url", s.cfg.CallbackURL),
-		zap.ByteString("payload", jsonData),
 		zap.Int("payload_size", len(jsonData)))
 
 	var lastErr error

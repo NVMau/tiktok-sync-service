@@ -51,8 +51,8 @@ func Load() *Config {
 			Port:        getEnv("PORT", "8000"),
 			Environment: getEnv("ENVIRONMENT", "development"),
 
-			// Database
-			DatabaseURL: getEnv("DATABASE_URL", "postgres://tiktok_sync:tiktok_sync_secret@localhost:5432/tiktok_sync_db?sslmode=disable"),
+			// Database - NO default credentials, must be set via environment
+			DatabaseURL: getEnv("DATABASE_URL", ""),
 			RedisURL:    getEnv("REDIS_URL", "localhost:6379"),
 
 			// Logging

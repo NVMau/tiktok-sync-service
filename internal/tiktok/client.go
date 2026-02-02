@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -91,7 +90,6 @@ func (c *Client) Request(ctx context.Context, method, path string, params map[st
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal body: %w", err)
 		}
-		log.Printf("Request body: %s", string(bodyBytes))
 	}
 
 	sign := signature.GenerateSign(c.cfg.TikTokAppSecret, path, params, bodyBytes)
@@ -102,8 +100,6 @@ func (c *Client) Request(ctx context.Context, method, path string, params map[st
 	}
 
 	fullURL := c.buildURL(path, params)
-	log.Printf("Request URL: %s %s", method, fullURL)
-	log.Printf("Body length: %d", len(bodyBytes))
 
 	var req *http.Request
 	if method == http.MethodGet || len(bodyBytes) == 0 {
@@ -133,7 +129,7 @@ func (c *Client) Request(ctx context.Context, method, path string, params map[st
 
 	var apiResp APIResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w, body: %s", err, string(respBody))
+		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if apiResp.Code != 0 {

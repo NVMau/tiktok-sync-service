@@ -75,7 +75,7 @@ func getWebhookTypeName(typeCode int) string {
 func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 	body := c.Body()
 
-	logger.Debug("webhook raw body received", zap.ByteString("body", body))
+	logger.Debug("webhook raw body received", zap.Int("body_size", len(body)))
 
 	sigValid, sigTimestamp := h.verifySignature(c, body)
 
@@ -83,7 +83,7 @@ func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		logger.Error("webhook parse error",
 			zap.Error(err),
-			zap.ByteString("body", body))
+			zap.Int("body_size", len(body)))
 		return c.SendStatus(fiber.StatusOK)
 	}
 

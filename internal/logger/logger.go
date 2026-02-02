@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -76,12 +77,19 @@ func newLogger(cfg *Config) *zap.Logger {
 				break
 			}
 		}
-		file, err := os.OpenFile(cfg.OutputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			writeSyncer = zapcore.AddSync(os.Stdout)
-		} else {
-			writeSyncer = zapcore.AddSync(file)
+		// Use lumberjack for log rotation
+		// - MaxSize: 100MB per file
+		// - MaxBackups: 30 files
+		// - MaxAge: 30 days
+		// - Compress: gzip old files
+		lumberjackLogger := &lumberjack.Logger{
+			Filename:   cfg.OutputPath,
+			MaxSize:    100, // MB
+			MaxBackups: 30,
+			MaxAge:     30, // days
+			Compress:   true,
 		}
+		writeSyncer = zapcore.AddSync(lumberjackLogger)
 	}
 
 	// Create encoder based on environment

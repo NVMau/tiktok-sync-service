@@ -44,5 +44,6 @@ require (
 	golang.org/x/text v0.20.0 // indirect
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4 // indirect
 	google.golang.org/protobuf v1.26.0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
 )

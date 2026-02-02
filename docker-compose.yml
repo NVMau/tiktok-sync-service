@@ -5,9 +5,9 @@ services:
     image: postgres:15-alpine
     container_name: tiktok_sync_postgres
     environment:
-      POSTGRES_USER: tiktok_sync
-      POSTGRES_PASSWORD: tiktok_sync_secret
-      POSTGRES_DB: tiktok_sync_db
+      POSTGRES_USER: ${POSTGRES_USER:-tiktok_sync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-tiktok_sync_db}
     ports:
       - "5432:5432"
     volumes:
@@ -39,7 +39,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgres://tiktok_sync:tiktok_sync_secret@postgres:5432/tiktok_sync_db?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD:-changeme_dev}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
       - REDIS_URL=redis:6379
       - PORT=8000
       - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
@@ -56,7 +56,7 @@ services:
     container_name: tiktok_sync_worker
     command: /app/worker
     environment:
-      - DATABASE_URL=postgres://tiktok_sync:tiktok_sync_secret@postgres:5432/tiktok_sync_db?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER:-tiktok_sync}:${POSTGRES_PASSWORD:-changeme_dev}@postgres:5432/${POSTGRES_DB:-tiktok_sync_db}?sslmode=disable
       - REDIS_URL=redis:6379
       - TIKTOK_APP_KEY=${TIKTOK_APP_KEY}
       - TIKTOK_APP_SECRET=${TIKTOK_APP_SECRET}
