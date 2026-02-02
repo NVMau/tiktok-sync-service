@@ -17,6 +17,7 @@ import (
 	"github.com/user/sync-tiktok-mps/internal/database"
 	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
+	"github.com/user/sync-tiktok-mps/pkg/masker"
 )
 
 // CallbackEventType defines the type of callback event
@@ -156,7 +157,8 @@ func (s *CallbackService) sendCallback(ctx context.Context, payload interface{})
 
 	logger.Debug("preparing callback request",
 		zap.String("url", s.cfg.CallbackURL),
-		zap.Int("payload_size", len(jsonData)))
+		zap.Int("payload_size", len(jsonData)),
+		zap.String("payload_masked", masker.MaskJSON(jsonData)))
 
 	var lastErr error
 	for attempt := 0; attempt <= s.cfg.CallbackRetries; attempt++ {

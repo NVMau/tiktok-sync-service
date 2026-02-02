@@ -187,46 +187,33 @@ func (s *OrderSyncService) shouldReserveSKU(status models.TikTokOrderStatus) boo
 	}
 }
 
-// reserveSKU - Reserve SKU (with transaction lock to prevent race condition)
+// reserveSKU - Reserve SKU using atomic update to prevent race condition
+// Uses WHERE clause with status check to ensure only AVAILABLE SKUs are reserved
 func (s *OrderSyncService) reserveSKU(ctx context.Context, tiktokSKUID, orderRef string) error {
-	tx := database.DB.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
+	// Atomic update: only update if status is AVAILABLE
+	// This prevents race condition without needing explicit locks
+	result := database.DB.Model(&models.SKU{}).
+		Where("tik_tok_sku_id = ? AND sale_status = ?", tiktokSKUID, models.SKUSaleStatusAvailable).
+		Updates(map[string]interface{}{
+			"sale_status": models.SKUSaleStatusReserved,
+			"updated_at":  time.Now(),
+		})
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to reserve SKU: %w", result.Error)
+	}
+
+	// Check if any row was actually updated
+	if result.RowsAffected == 0 {
+		// Either SKU not found or already reserved/sold
+		var sku models.SKU
+		if err := database.DB.Where("tik_tok_sku_id = ?", tiktokSKUID).First(&sku).Error; err != nil {
+			return fmt.Errorf("SKU tik_tok_sku_id=%s not found", tiktokSKUID)
 		}
-	}()
-
-	var sku models.SKU
-	err := tx.Set("gorm:query_option", "FOR UPDATE").
-		Where("tik_tok_sku_id = ?", tiktokSKUID).
-		First(&sku).Error
-
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("SKU tik_tok_sku_id=%s not found: %w", tiktokSKUID, err)
-	}
-
-	// Check if already reserved or sold
-	if sku.SaleStatus != models.SKUSaleStatusAvailable {
-		tx.Rollback()
-		return fmt.Errorf("SKU %s already %s", sku.SellerSKU, sku.SaleStatus)
-	}
-
-	// Reserve
-	sku.SaleStatus = models.SKUSaleStatusReserved
-	sku.UpdatedAt = time.Now()
-
-	if err := tx.Save(&sku).Error; err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to update SKU: %w", err)
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
+		return fmt.Errorf("SKU %s already %s (cannot reserve)", sku.SellerSKU, sku.SaleStatus)
 	}
 
 	logger.Info("reserved SKU for order",
-		zap.String("seller_sku", sku.SellerSKU),
 		zap.String("tiktok_sku_id", tiktokSKUID),
 		zap.String("order_ref", orderRef))
 	return nil

@@ -113,14 +113,14 @@ func registerRoutes(api fiber.Router, cfg *config.Config) {
 	api.Put("/skus/:id/price", inventoryHandler.UpdateInventory)
 
 	// Inventory sync
-	api.Post("/shops/:shop_id/skus/:sku_id/sync", inventoryHandler.SyncSKUInventory)
-	api.Post("/shops/:shop_id/products/:product_id/sync-inventory", inventoryHandler.SyncProductInventory)
+	// api.Post("/shops/:shop_id/skus/:sku_id/sync", inventoryHandler.SyncSKUInventory)
+	// api.Post("/shops/:shop_id/products/:product_id/sync-inventory", inventoryHandler.SyncProductInventory)
 	api.Get("/shops/:shop_id/inventory/stats", inventoryHandler.GetInventoryStats)
 	api.Get("/shops/:shop_id/skus/pending", inventoryHandler.GetPendingSKUs)
 
 	// Push SKU to TikTok
-	api.Post("/shops/:shop_id/products/:product_id/push-skus", inventoryHandler.PushPendingSKUs)
-	api.Post("/shops/:shop_id/skus/:sku_id/push", inventoryHandler.PushSingleSKU)
+	// api.Post("/shops/:shop_id/products/:product_id/push-skus", inventoryHandler.PushPendingSKUs)
+	// api.Post("/shops/:shop_id/skus/:sku_id/push", inventoryHandler.PushSingleSKU)
 
 	// Legacy endpoints
 	api.Get("/inventory", inventoryHandler.ListInventory)
@@ -130,8 +130,8 @@ func registerRoutes(api fiber.Router, cfg *config.Config) {
 	fulfillmentHandler := handlers.NewFulfillmentHandler(cfg)
 	api.Get("/shops/:shop_id/orders/ready-to-ship", fulfillmentHandler.GetReadyToShipOrders)
 	api.Get("/shops/:shop_id/orders/in-transit", fulfillmentHandler.GetInTransitOrders)
-	api.Post("/shops/:shop_id/orders/:order_id/ship", fulfillmentHandler.ShipOrder)
-	api.Post("/shops/:shop_id/orders/:order_id/ship-async", fulfillmentHandler.ShipOrderAsync)
+	// api.Post("/shops/:shop_id/orders/:order_id/ship", fulfillmentHandler.ShipOrder)
+	// api.Post("/shops/:shop_id/orders/:order_id/ship-async", fulfillmentHandler.ShipOrderAsync)
 	api.Get("/shops/:shop_id/shipping-providers", fulfillmentHandler.GetShippingProviders)
 	api.Get("/shops/:shop_id/warehouses", fulfillmentHandler.GetWarehouses)
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/user/sync-tiktok-mps/internal/logger"
 	"github.com/user/sync-tiktok-mps/internal/models"
 	"github.com/user/sync-tiktok-mps/internal/workers"
+	"github.com/user/sync-tiktok-mps/pkg/masker"
 	"github.com/user/sync-tiktok-mps/pkg/signature"
 )
 
@@ -42,13 +43,13 @@ type WebhookPayload struct {
 
 // Webhook type constants
 const (
-	WebhookTypeOrderStatusChange    = 1
-	WebhookTypeReverseStatusUpdate  = 2
-	WebhookTypeRecipientAddress     = 3
-	WebhookTypePackageUpdate        = 4
-	WebhookTypeProductStatusChange  = 5
+	WebhookTypeOrderStatusChange     = 1
+	WebhookTypeReverseStatusUpdate   = 2
+	WebhookTypeRecipientAddress      = 3
+	WebhookTypePackageUpdate         = 4
+	WebhookTypeProductStatusChange   = 5
 	WebhookTypeSellerDeauthorization = 6
-	WebhookTypeAuthExpire           = 7
+	WebhookTypeAuthExpire            = 7
 )
 
 func getWebhookTypeName(typeCode int) string {
@@ -75,7 +76,9 @@ func getWebhookTypeName(typeCode int) string {
 func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 	body := c.Body()
 
-	logger.Debug("webhook raw body received", zap.Int("body_size", len(body)))
+	logger.Debug("webhook raw body received",
+		zap.Int("body_size", len(body)),
+		zap.String("body_masked", masker.MaskJSON(body)))
 
 	sigValid, sigTimestamp := h.verifySignature(c, body)
 
@@ -83,12 +86,16 @@ func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		logger.Error("webhook parse error",
 			zap.Error(err),
-			zap.Int("body_size", len(body)))
+			zap.Int("body_size", len(body)),
+			zap.String("body_masked", masker.MaskJSON(body)))
 		return c.SendStatus(fiber.StatusOK)
 	}
 
 	if !h.validateTimestamp(payload.Timestamp) {
-		logger.Warn("webhook timestamp too old", zap.Int64("timestamp", payload.Timestamp))
+		logger.Warn("webhook timestamp too old, rejecting (possible replay attack)",
+			zap.Int64("timestamp", payload.Timestamp),
+			zap.String("shop_id", payload.ShopID))
+		return c.SendStatus(fiber.StatusOK)
 	}
 
 	var shop models.Shop
@@ -110,6 +117,21 @@ func (h *WebhookHandler) HandleTikTokWebhook(c *fiber.Ctx) error {
 		Payload:        body,
 		SignatureValid: sigValid,
 		ProcessStatus:  models.EventStatusPending,
+	}
+
+	// SECURITY: Reject invalid signature webhooks in production
+	if !sigValid {
+		logger.Warn("webhook signature invalid, rejecting",
+			zap.String("shop_id", payload.ShopID),
+			zap.String("event_type", eventTypeName))
+		
+		// Still store for audit, but mark as failed
+		event.ProcessStatus = models.EventStatusFailed
+		event.Error = "invalid signature"
+		database.DB.Create(&event)
+		
+		// Return 200 to TikTok (they require it), but don't process
+		return c.SendStatus(fiber.StatusOK)
 	}
 
 	result := database.DB.Where("event_id = ?", eventID).FirstOrCreate(&event)
@@ -157,7 +179,8 @@ func (h *WebhookHandler) verifySignature(c *fiber.Ctx, body []byte) (bool, strin
 	}
 
 	if h.cfg.TikTokWebhookSecret == "" {
-		return true, timestamp
+		logger.Warn("TIKTOK_WEBHOOK_SECRET not configured, rejecting webhook for security")
+		return false, timestamp
 	}
 
 	valid := signature.VerifyWebhookSignature(h.cfg.TikTokWebhookSecret, timestamp, body, sig)

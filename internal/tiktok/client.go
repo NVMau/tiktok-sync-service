@@ -101,22 +101,15 @@ func (c *Client) Request(ctx context.Context, method, path string, params map[st
 
 	fullURL := c.buildURL(path, params)
 
-	var req *http.Request
-	if method == http.MethodGet || len(bodyBytes) == 0 {
-		req, err = http.NewRequestWithContext(ctx, method, fullURL, nil)
-	} else {
-		req, err = http.NewRequestWithContext(ctx, method, fullURL, bytes.NewReader(bodyBytes))
+	// Build headers
+	headers := map[string]string{
+		"Content-Type": "application/json",
 	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
 	if opt != nil && opt.AccessToken != "" {
-		req.Header.Set("x-tts-access-token", opt.AccessToken)
+		headers["x-tts-access-token"] = opt.AccessToken
 	}
 
-	resp, err := c.doWithRetry(req, 3)
+	resp, err := c.doWithRetry(ctx, method, fullURL, bodyBytes, headers, 3)
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +142,25 @@ func (c *Client) buildURL(path string, params map[string]string) string {
 	return u.String()
 }
 
-func (c *Client) doWithRetry(req *http.Request, maxRetries int) (*http.Response, error) {
+func (c *Client) doWithRetry(ctx context.Context, method, url string, bodyBytes []byte, headers map[string]string, maxRetries int) (*http.Response, error) {
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
+		// Create fresh request each retry (body reader is consumed after each attempt)
+		var body io.Reader
+		if len(bodyBytes) > 0 {
+			body = bytes.NewReader(bodyBytes)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, url, body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		// Set headers
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			lastErr = err

@@ -1,7 +1,9 @@
 package database
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -21,8 +23,38 @@ func Connect(databaseURL string) error {
 		return err
 	}
 
+	// Configure connection pool
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+
+	// Set connection pool settings
+	sqlDB.SetMaxOpenConns(25)                 // Max open connections
+	sqlDB.SetMaxIdleConns(10)                 // Max idle connections
+	sqlDB.SetConnMaxLifetime(5 * time.Minute) // Connection max lifetime
+
+	// Verify connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		return err
+	}
+
 	log.Println("Database connected successfully")
 	return nil
+}
+
+// Close closes the database connection
+func Close() error {
+	if DB == nil {
+		return nil
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func Migrate() error {

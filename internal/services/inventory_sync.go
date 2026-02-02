@@ -179,22 +179,30 @@ func (s *InventorySyncService) MarkSKUAsSold(ctx context.Context, skuID uint) er
 }
 
 // ReserveSKU - Reserve SKU when there is a new order
-// Prevents double selling
+// Uses atomic update to prevent race condition (double selling)
 func (s *InventorySyncService) ReserveSKU(ctx context.Context, skuID uint) error {
-	var sku models.SKU
-	if err := database.DB.First(&sku, skuID).Error; err != nil {
-		return err
-	}
-
-	if sku.SaleStatus != models.SKUSaleStatusAvailable {
-		return fmt.Errorf("SKU %s is not available (status: %s)", sku.SellerSKU, sku.SaleStatus)
-	}
-
-	return database.DB.Model(&sku).
+	// Atomic update: only update if status is AVAILABLE
+	result := database.DB.Model(&models.SKU{}).
+		Where("id = ? AND sale_status = ?", skuID, models.SKUSaleStatusAvailable).
 		Updates(map[string]interface{}{
 			"sale_status": models.SKUSaleStatusReserved,
 			"updated_at":  time.Now(),
-		}).Error
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// Check if any row was actually updated
+	if result.RowsAffected == 0 {
+		var sku models.SKU
+		if err := database.DB.First(&sku, skuID).Error; err != nil {
+			return fmt.Errorf("SKU id=%d not found", skuID)
+		}
+		return fmt.Errorf("SKU %s is not available (status: %s)", sku.SellerSKU, sku.SaleStatus)
+	}
+
+	return nil
 }
 
 // ReleaseSKU - Release SKU when order is cancelled
