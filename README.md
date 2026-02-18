@@ -33,8 +33,11 @@ cd tiktok
 go mod download
 
 # Configure environment
-cp .env.example .env
-# Edit .env with your credentials
+cp .env.dev.example .env
+# ⚠️ IMPORTANT: Edit .env and change default passwords!
+
+# Set database password
+export POSTGRES_PASSWORD="your_secure_password"
 
 # Start services
 docker-compose -f docker-compose.dev.yml up -d
@@ -52,8 +55,11 @@ go run ./cmd/worker
 |----------|-------------|
 | `TIKTOK_APP_KEY` | TikTok Developer App Key |
 | `TIKTOK_APP_SECRET` | TikTok Developer App Secret |
+| `POSTGRES_PASSWORD` | **Required** - PostgreSQL password |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string |
+
+**⚠️ Security Note**: See [SECURITY.md](SECURITY.md) for important security best practices.
 
 ## Project Structure
 

@@ -5,9 +5,9 @@ services:
     image: postgres:15-alpine
     container_name: tiktok_sync_postgres
     environment:
-      POSTGRES_USER: tiktok_sync
-      POSTGRES_PASSWORD: tiktok_sync_secret
-      POSTGRES_DB: tiktok_sync_db
+      POSTGRES_USER: ${POSTGRES_USER:-tiktok_sync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-tiktok_sync_db}
     ports:
       - "5432:5432"
     volumes:
