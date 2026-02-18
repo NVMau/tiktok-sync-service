@@ -221,7 +221,18 @@ Before deploying to production:
 
 ## Reporting Security Issues
 
-If you discover a security vulnerability, please email security@your-domain.com instead of opening a public issue.
+If you discover a security vulnerability, please report it privately:
+
+1. **GitHub Security Advisories** (Recommended):
+   - Go to the repository's Security tab
+   - Click "Report a vulnerability"
+   - Provide details about the issue
+
+2. **Direct Contact**:
+   - Open a private issue and tag the repository owner
+   - Email the repository owner directly if their email is available
+
+**Please do not** open public issues for security vulnerabilities.
 
 ## Additional Resources
 
